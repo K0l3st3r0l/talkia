@@ -4,30 +4,86 @@ import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/constants.dart';
+import '../../core/log_service.dart';
+
+class OtaCheckResult {
+  final int localBuild;
+  final int serverBuild;
+  final bool hasUpdate;
+  final String apkUrl;
+
+  OtaCheckResult({
+    required this.localBuild,
+    required this.serverBuild,
+    required this.hasUpdate,
+    required this.apkUrl,
+  });
+}
 
 class OtaService {
   final Dio _dio = Dio();
 
-  Future<void> checkAndUpdate() async {
+  static Future<String> get currentVersion async {
+    final info = await PackageInfo.fromPlatform();
+    final build = int.tryParse(info.buildNumber) ?? kAppBuild;
+    return 'v${info.version} (build $build)';
+  }
+
+  Future<OtaCheckResult?> checkForUpdate() async {
     try {
       final info = await PackageInfo.fromPlatform();
       final localBuild = int.tryParse(info.buildNumber) ?? kAppBuild;
+      log.info('OTA check — local build: $localBuild');
 
       final res = await _dio.get(kOtaVersionUrl);
       final serverBuild = res.data['build'] as int? ?? 0;
       final apkUrl = res.data['url'] as String? ?? kOtaApkUrl;
+      log.info('OTA server build: $serverBuild');
 
-      if (serverBuild <= localBuild) return;
+      return OtaCheckResult(
+        localBuild: localBuild,
+        serverBuild: serverBuild,
+        hasUpdate: serverBuild > localBuild,
+        apkUrl: apkUrl,
+      );
+    } catch (e) {
+      log.error('OTA check falló', e);
+      return null;
+    }
+  }
 
+  Future<void> downloadAndInstall(
+    String apkUrl, {
+    void Function(int received, int total)? onProgress,
+  }) async {
+    try {
       final dir = await getTemporaryDirectory();
       final apkPath = '${dir.path}/talkia-update.apk';
+      log.info('OTA descargando desde $apkUrl');
 
-      await _dio.download(apkUrl, apkPath);
+      await _dio.download(
+        apkUrl,
+        apkPath,
+        onReceiveProgress: onProgress,
+      );
 
       final f = File(apkPath);
-      if (await f.length() == 0) return;
-
+      final size = await f.length();
+      if (size == 0) {
+        log.error('OTA APK descargado vacío');
+        return;
+      }
+      log.info('OTA descarga OK — $size bytes, instalando…');
       await OpenFilex.open(apkPath, type: 'application/vnd.android.package-archive');
-    } catch (_) {}
+    } catch (e) {
+      log.error('OTA download/install falló', e);
+      rethrow;
+    }
+  }
+
+  Future<void> checkAndUpdate() async {
+    final result = await checkForUpdate();
+    if (result == null || !result.hasUpdate) return;
+    await downloadAndInstall(result.apkUrl);
   }
 }

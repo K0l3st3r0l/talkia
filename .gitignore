@@ -54,3 +54,4 @@ ota/releases/*.apk
 
 # Server env
 server/.env
+talkia-latest.apk

@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/log_service.dart';
+import '../../debug/log_screen.dart';
 import '../services/radio_service.dart';
 
 class RadioScreen extends StatefulWidget {
@@ -19,6 +21,7 @@ class _RadioScreenState extends State<RadioScreen>
 
   RadioState _state = RadioState.disconnected;
   int _userCount = 0;
+  int _roomCodeTaps = 0;
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
@@ -50,7 +53,16 @@ class _RadioScreenState extends State<RadioScreen>
     _init();
   }
 
+  void _onRoomCodeTap() {
+    _roomCodeTaps++;
+    if (_roomCodeTaps >= 3) {
+      _roomCodeTaps = 0;
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LogScreen()));
+    }
+  }
+
   Future<void> _init() async {
+    log.info('RadioScreen init — sala: ${widget.roomCode}');
     await _radio.init();
 
     // Verificar permiso de micrófono
@@ -144,27 +156,30 @@ class _RadioScreenState extends State<RadioScreen>
             if (mounted) Navigator.of(context).pop();
           },
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Text(
-                  'SALA ',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, letterSpacing: 2),
-                ),
-                Text(
-                  widget.roomCode,
-                  style: const TextStyle(
-                    color: AppTheme.accent,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 3,
+        title: GestureDetector(
+          onTap: _onRoomCodeTap,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    'SALA ',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, letterSpacing: 2),
                   ),
-                ),
-              ],
-            ),
-          ],
+                  Text(
+                    widget.roomCode,
+                    style: const TextStyle(
+                      color: AppTheme.accent,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 3,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
         actions: [
           Padding(

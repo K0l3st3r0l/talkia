@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
 import '../../../core/constants.dart';
+import '../../../core/log_service.dart';
 import 'audio_service.dart';
 
 enum RadioState { disconnected, connecting, connected, transmitting, receiving }
@@ -46,30 +47,36 @@ class RadioService {
     _setState(RadioState.connecting);
     try {
       final uri = Uri.parse('$kServerWsUrl/${_roomCode}');
+      log.info('WS connecting → $uri');
       _channel = WebSocketChannel.connect(uri);
       await _channel!.ready;
 
       _wsSub = _channel!.stream.listen(
         _onMessage,
         onDone: _onDisconnected,
-        onError: (_) => _onDisconnected(),
+        onError: (e) {
+          log.error('WS stream error', e);
+          _onDisconnected();
+        },
         cancelOnError: false,
       );
 
+      log.info('WS connected');
       _setState(RadioState.connected);
       _startPing();
-    } catch (_) {
+    } catch (e) {
+      log.error('WS connect failed', e);
       _scheduleReconnect();
     }
   }
 
   void _onMessage(dynamic data) {
     if (data is List<int> || data is Uint8List) {
-      // Audio recibido → reproducir
+      final bytes = data is Uint8List ? data : Uint8List.fromList(data as List<int>);
+      log.info('audio chunk recibido: ${bytes.length} bytes');
       if (_state != RadioState.transmitting) {
         _setState(RadioState.receiving);
-        _audio.playChunk(Uint8List.fromList(data as List<int>));
-        // Volver a "connected" después de un breve tiempo
+        _audio.playChunk(bytes);
         Future.delayed(const Duration(milliseconds: 150), () {
           if (_state == RadioState.receiving) {
             _setState(RadioState.connected);
@@ -80,12 +87,14 @@ class RadioService {
       try {
         final msg = jsonDecode(data) as Map<String, dynamic>;
         final type = msg['type'] as String? ?? '';
+        log.info('WS msg: $type');
         switch (type) {
           case 'welcome':
           case 'user_joined':
           case 'user_left':
             _userCount = (msg['count'] as int?) ?? _userCount;
             _userCountCtrl.add(_userCount);
+            log.info('usuarios en sala: $_userCount');
           case 'ptt_start':
             if (_state != RadioState.transmitting) {
               _setState(RadioState.receiving);
@@ -97,11 +106,14 @@ class RadioService {
           case 'pong':
             break;
         }
-      } catch (_) {}
+      } catch (e) {
+        log.error('WS msg parse error', e);
+      }
     }
   }
 
   void _onDisconnected() {
+    log.warn('WS desconectado');
     _pingTimer?.cancel();
     _wsSub?.cancel();
     if (!_disposed) {
@@ -127,17 +139,35 @@ class RadioService {
   }
 
   Future<void> startTransmitting() async {
-    if (_state != RadioState.connected) return;
+    if (_state != RadioState.connected) {
+      log.warn('startTransmitting ignorado — estado: $_state');
+      return;
+    }
+    log.info('PTT start');
     _setState(RadioState.transmitting);
     _sendText({'type': 'ptt_start'});
-    await _audio.startRecording((chunk) {
-      _channel?.sink.add(chunk);
-    });
+    try {
+      await _audio.startRecording((chunk) {
+        _channel?.sink.add(chunk);
+      });
+      log.info('grabación iniciada');
+    } catch (e) {
+      log.error('startRecording falló', e);
+      _setState(RadioState.connected);
+    }
   }
 
   Future<void> stopTransmitting() async {
-    if (_state != RadioState.transmitting) return;
-    await _audio.stopRecording();
+    if (_state != RadioState.transmitting) {
+      log.warn('stopTransmitting ignorado — estado: $_state');
+      return;
+    }
+    log.info('PTT stop');
+    try {
+      await _audio.stopRecording();
+    } catch (e) {
+      log.error('stopRecording falló', e);
+    }
     _sendText({'type': 'ptt_end'});
     _setState(RadioState.connected);
   }
