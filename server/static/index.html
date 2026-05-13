@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>TalkIA — Walkie-talkie</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0A0A1A;
+    color: #E0E0E0;
+    font-family: system-ui, sans-serif;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ── Join screen ── */
+  #join {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    max-width: 320px;
+  }
+  .logo {
+    width: 90px; height: 90px;
+    border-radius: 50%;
+    background: #1A1A2E;
+    border: 2px solid #00BCD4;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo svg { width: 44px; height: 44px; fill: #00BCD4; }
+  h1 { font-size: 32px; font-weight: 700; letter-spacing: 4px; color: #fff; }
+  .subtitle { font-size: 13px; color: #666; }
+  .version { font-size: 11px; color: #444; }
+  input[type=text] {
+    width: 100%;
+    background: #1A1A2E;
+    border: 1px solid #444;
+    border-radius: 12px;
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    text-align: center;
+    padding: 14px;
+    outline: none;
+    text-transform: uppercase;
+  }
+  input[type=text]:focus { border-color: #00BCD4; border-width: 2px; }
+  input[type=text]::placeholder { font-size: 13px; letter-spacing: 3px; color: #444; font-weight: 400; }
+  .btn-primary {
+    width: 100%;
+    background: #00BCD4;
+    color: #000;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    border: none;
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+  }
+  .btn-primary:disabled { opacity: 0.5; }
+  .hint { font-size: 12px; color: #555; text-align: center; line-height: 1.6; }
+
+  /* ── Radio screen ── */
+  #radio {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 400px;
+    height: 100dvh;
+    padding: 0;
+  }
+  .topbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: #1A1A2E;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  #btn-back { background: none; border: none; color: #666; cursor: pointer; font-size: 20px; padding: 4px; }
+  .room-label { font-size: 11px; color: #666; letter-spacing: 2px; }
+  .room-code { font-size: 14px; font-weight: 700; color: #00BCD4; letter-spacing: 3px; }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+  #btn-mute { background: none; border: none; color: #666; cursor: pointer; font-size: 20px; padding: 4px; }
+  #btn-mute.muted { color: #FF5252; }
+  .user-count { display: flex; align-items: center; gap: 4px; font-size: 14px; font-weight: 700; color: #666; }
+  .user-count svg { width: 14px; height: 14px; fill: #666; }
+
+  .status-bar {
+    width: 100%;
+    padding: 8px;
+    background: #1A1A2E;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 3px;
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+
+  .main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 40px;
+    width: 100%;
+  }
+
+  /* PTT button */
+  .ptt-wrap { position: relative; width: 180px; height: 180px; display: flex; align-items: center; justify-content: center; }
+  .ptt-rings {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .ptt-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  #ptt {
+    width: 160px; height: 160px;
+    border-radius: 50%;
+    background: rgba(85,85,85,0.15);
+    border: 2px solid #555;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: all 0.2s;
+  }
+  #ptt svg { width: 72px; height: 72px; fill: #555; transition: fill 0.2s; }
+  #ptt.transmitting {
+    background: rgba(255,82,82,0.15);
+    border-color: #FF5252;
+    border-width: 4px;
+    box-shadow: 0 0 30px rgba(255,82,82,0.4);
+  }
+  #ptt.transmitting svg { fill: #FF5252; }
+  #ptt.receiving {
+    background: rgba(76,175,80,0.15);
+    border-color: #4CAF50;
+    border-width: 4px;
+    box-shadow: 0 0 30px rgba(76,175,80,0.4);
+  }
+  #ptt.receiving svg { fill: #4CAF50; }
+  #ptt.connected {
+    background: rgba(0,188,212,0.15);
+    border-color: #00BCD4;
+  }
+  #ptt.connected svg { fill: #00BCD4; }
+
+  @keyframes ring-out {
+    0%   { width: 160px; height: 160px; opacity: 0.5; }
+    100% { width: 260px; height: 260px; opacity: 0; }
+  }
+  .ptt-ring.active { animation: ring-out 1.2s ease-out infinite; }
+  .ptt-ring:nth-child(2).active { animation-delay: 0.4s; }
+  .ptt-ring:nth-child(3).active { animation-delay: 0.8s; }
+
+  .ptt-hint { font-size: 11px; letter-spacing: 2px; color: #555; text-align: center; min-height: 18px; }
+
+  .footer { padding-bottom: 24px; font-size: 12px; color: #444; }
+
+  /* Confirm dialog */
+  .overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .overlay.visible { display: flex; }
+  .dialog {
+    background: #1A1A2E;
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 300px;
+    width: 90%;
+  }
+  .dialog h3 { color: #fff; margin-bottom: 10px; }
+  .dialog p { color: #888; font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+  .dialog-buttons { display: flex; gap: 12px; justify-content: flex-end; }
+  .btn-cancel { background: none; border: none; color: #888; font-size: 13px; letter-spacing: 1px; cursor: pointer; padding: 8px 12px; }
+  .btn-confirm { background: none; border: none; color: #FF5252; font-size: 13px; font-weight: 700; letter-spacing: 1px; cursor: pointer; padding: 8px 12px; }
+</style>
+</head>
+<body>
+
+<!-- Join screen -->
+<div id="join">
+  <div class="logo">
+    <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
+  </div>
+  <h1>TalkIA</h1>
+  <p class="subtitle">Walkie-talkie digital</p>
+  <p class="version" id="ver"></p>
+  <input type="text" id="room-input" maxlength="12" placeholder="CÓDIGO DE SALA" autocomplete="off" autocorrect="off" spellcheck="false">
+  <button class="btn-primary" id="btn-join">CONECTAR</button>
+  <p class="hint">Todos los dispositivos en el mismo código<br>pueden escucharse entre sí</p>
+</div>
+
+<!-- Radio screen -->
+<div id="radio">
+  <div class="topbar">
+    <div class="topbar-left">
+      <button id="btn-back">‹</button>
+      <div>
+        <div class="room-label">SALA</div>
+        <div class="room-code" id="display-room"></div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button id="btn-mute" title="Silenciar audio entrante">🔊</button>
+      <div class="user-count">
+        <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+        <span id="user-count">1</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">CONECTANDO...</span>
+  </div>
+
+  <div class="main-area">
+    <div class="ptt-wrap">
+      <div class="ptt-rings">
+        <div class="ptt-ring" id="ring1"></div>
+        <div class="ptt-ring" id="ring2"></div>
+        <div class="ptt-ring" id="ring3"></div>
+      </div>
+      <div id="ptt">
+        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
+      </div>
+    </div>
+    <p class="ptt-hint" id="ptt-hint">PRESIONA PARA HABLAR</p>
+  </div>
+
+  <div class="footer" id="footer">Solo tú en la sala</div>
+</div>
+
+<!-- Exit confirm dialog -->
+<div class="overlay" id="overlay">
+  <div class="dialog">
+    <h3>¿Salir de la sala?</h3>
+    <p id="dialog-msg">¿Confirmas que quieres salir?</p>
+    <div class="dialog-buttons">
+      <button class="btn-cancel" id="btn-cancel">CANCELAR</button>
+      <button class="btn-confirm" id="btn-confirm-exit">SALIR</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const WS_BASE = 'wss://talkia.laravas.com/ws';
+const SAMPLE_RATE = 16000;
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let ws = null;
+let roomCode = '';
+let state = 'disconnected'; // disconnected|connecting|connected|transmitting|receiving
+let userCount = 1;
+let muted = false;
+let transmitting = false;
+
+// Audio
+let audioCtx = null;
+let mediaStream = null;
+let scriptProcessor = null;
+let playQueue = [];
+let playTime = 0;
+
+// ── UI refs ───────────────────────────────────────────────────────────────────
+const joinEl    = document.getElementById('join');
+const radioEl   = document.getElementById('radio');
+const roomInput = document.getElementById('room-input');
+const btnJoin   = document.getElementById('btn-join');
+const btnBack   = document.getElementById('btn-back');
+const btnMute   = document.getElementById('btn-mute');
+const ptt       = document.getElementById('ptt');
+const statusDot = document.getElementById('status-dot');
+const statusTxt = document.getElementById('status-text');
+const displayRoom = document.getElementById('display-room');
+const userCountEl = document.getElementById('user-count');
+const footerEl  = document.getElementById('footer');
+const pttHint   = document.getElementById('ptt-hint');
+const overlay   = document.getElementById('overlay');
+const ring1 = document.getElementById('ring1');
+const ring2 = document.getElementById('ring2');
+const ring3 = document.getElementById('ring3');
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function setState(s) {
+  state = s;
+  const colors = { disconnected:'#555', connecting:'#888', connected:'#00BCD4', transmitting:'#FF5252', receiving:'#4CAF50' };
+  const labels = { disconnected:'DESCONECTADO', connecting:'CONECTANDO...', connected:'LISTO', transmitting:'TRANSMITIENDO', receiving:'ESCUCHANDO...' };
+  statusDot.style.background = colors[s] || '#555';
+  statusTxt.textContent = labels[s] || s.toUpperCase();
+  statusTxt.style.color = colors[s] || '#555';
+
+  ptt.className = s === 'transmitting' ? 'transmitting' : s === 'receiving' ? 'receiving' : s === 'connected' ? 'connected' : '';
+
+  const active = s === 'transmitting' || s === 'receiving';
+  [ring1, ring2, ring3].forEach(r => r.classList.toggle('active', active));
+  const ringColor = s === 'transmitting' ? '#FF5252' : '#4CAF50';
+  [ring1, ring2, ring3].forEach(r => r.style.color = active ? ringColor : 'transparent');
+
+  if (s === 'connected')    pttHint.textContent = 'PRESIONA PARA HABLAR';
+  else if (s === 'transmitting') pttHint.textContent = 'SUELTA PARA TERMINAR';
+  else if (s === 'receiving')    pttHint.textContent = 'ESCUCHANDO...';
+  else pttHint.textContent = '';
+}
+
+function updateUsers(count) {
+  userCount = count;
+  userCountEl.textContent = count;
+  userCountEl.style.color = count > 1 ? '#4CAF50' : '#666';
+  footerEl.textContent = count === 1 ? 'Solo tú en la sala' : `${count} usuarios conectados`;
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connect(room) {
+  setState('connecting');
+  ws = new WebSocket(`${WS_BASE}/${room}`);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => setState('connected');
+
+  ws.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) {
+      if (!muted && state !== 'transmitting') {
+        setState('receiving');
+        playPcm(new Int16Array(ev.data));
+        setTimeout(() => { if (state === 'receiving') setState('connected'); }, 300);
+      }
+      return;
+    }
+    try {
+      const msg = JSON.parse(ev.data);
+      if (['welcome','user_joined','user_left'].includes(msg.type)) updateUsers(msg.count);
+      if (msg.type === 'ptt_start' && state !== 'transmitting') setState('receiving');
+      if (msg.type === 'ptt_end' && state === 'receiving') setState('connected');
+    } catch(_) {}
+  };
+
+  ws.onclose = () => {
+    setState('disconnected');
+    if (radioEl.style.display !== 'none') setTimeout(() => connect(room), 3000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+// ── Audio playback (Web Audio API) ───────────────────────────────────────────
+function getAudioCtx() {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+function playPcm(int16Samples) {
+  const ctx = getAudioCtx();
+  const float32 = new Float32Array(int16Samples.length);
+  for (let i = 0; i < int16Samples.length; i++) float32[i] = int16Samples[i] / 32768;
+
+  const buf = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
+  buf.copyToChannel(float32, 0);
+
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+
+  const now = ctx.currentTime;
+  const startAt = Math.max(now, playTime);
+  src.start(startAt);
+  playTime = startAt + buf.duration;
+}
+
+// ── Recording (ScriptProcessorNode) ──────────────────────────────────────────
+async function startRecording() {
+  const ctx = getAudioCtx();
+  mediaStream = await navigator.mediaDevices.getUserMedia({ audio: {
+    sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true, noiseSuppression: true
+  }});
+
+  const src = ctx.createMediaStreamSource(mediaStream);
+  // ScriptProcessor para convertir float32 → int16 y enviar
+  scriptProcessor = ctx.createScriptProcessor(2048, 1, 1);
+  scriptProcessor.onaudioprocess = (e) => {
+    if (!transmitting || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const f32 = e.inputBuffer.getChannelData(0);
+    const int16 = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) {
+      int16[i] = Math.max(-32768, Math.min(32767, f32[i] * 32768));
+    }
+    ws.send(int16.buffer);
+  };
+  src.connect(scriptProcessor);
+  scriptProcessor.connect(ctx.destination);
+}
+
+function stopRecording() {
+  scriptProcessor?.disconnect();
+  scriptProcessor = null;
+  mediaStream?.getTracks().forEach(t => t.stop());
+  mediaStream = null;
+}
+
+// ── PTT ───────────────────────────────────────────────────────────────────────
+async function onPttDown() {
+  if (state !== 'connected') return;
+  transmitting = true;
+  setState('transmitting');
+  ws?.send(JSON.stringify({ type: 'ptt_start' }));
+  await startRecording();
+}
+
+function onPttUp() {
+  if (!transmitting) return;
+  transmitting = false;
+  stopRecording();
+  ws?.send(JSON.stringify({ type: 'ptt_end' }));
+  setState('connected');
+}
+
+ptt.addEventListener('pointerdown', (e) => { e.preventDefault(); onPttDown(); });
+ptt.addEventListener('pointerup',   (e) => { e.preventDefault(); onPttUp(); });
+ptt.addEventListener('pointercancel',(e)=> { e.preventDefault(); onPttUp(); });
+ptt.addEventListener('pointerleave',(e) => { if (transmitting) { e.preventDefault(); onPttUp(); } });
+
+// ── Join / Leave ──────────────────────────────────────────────────────────────
+function enterRoom(room) {
+  roomCode = room.toUpperCase().trim();
+  displayRoom.textContent = roomCode;
+  joinEl.style.display = 'none';
+  radioEl.style.display = 'flex';
+  playTime = 0;
+  connect(roomCode);
+  // Guardar última sala
+  localStorage.setItem('last_room', roomCode);
+}
+
+function leaveRoom() {
+  transmitting = false;
+  stopRecording();
+  ws?.close();
+  ws = null;
+  setState('disconnected');
+  radioEl.style.display = 'none';
+  joinEl.style.display = 'flex';
+}
+
+// ── Exit confirm ──────────────────────────────────────────────────────────────
+function showExitConfirm() {
+  document.getElementById('dialog-msg').textContent =
+    `Hay ${userCount} ${userCount === 1 ? 'usuario' : 'usuarios'} en la sala. ¿Confirmas que quieres salir?`;
+  overlay.classList.add('visible');
+}
+document.getElementById('btn-cancel').addEventListener('click', () => overlay.classList.remove('visible'));
+document.getElementById('btn-confirm-exit').addEventListener('click', () => {
+  overlay.classList.remove('visible');
+  leaveRoom();
+});
+
+btnBack.addEventListener('click', () => {
+  if (userCount > 1 || state === 'connected') showExitConfirm();
+  else leaveRoom();
+});
+
+// ── Mute ──────────────────────────────────────────────────────────────────────
+btnMute.addEventListener('click', () => {
+  muted = !muted;
+  btnMute.textContent = muted ? '🔇' : '🔊';
+  btnMute.classList.toggle('muted', muted);
+});
+
+// ── Join button ───────────────────────────────────────────────────────────────
+btnJoin.addEventListener('click', () => {
+  const code = roomInput.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!code) return;
+  enterRoom(code);
+});
+roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') btnJoin.click(); });
+roomInput.addEventListener('input', () => {
+  roomInput.value = roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+});
+
+// Cargar última sala guardada
+const lastRoom = localStorage.getItem('last_room');
+if (lastRoom) roomInput.value = lastRoom;
+
+// Versión
+document.getElementById('ver').textContent = 'Web v1.0';
+
+// Prevenir scroll/zoom en móvil al tocar el botón
+document.addEventListener('touchmove', e => { if (e.target === ptt) e.preventDefault(); }, { passive: false });
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/log_service.dart';
@@ -22,6 +23,7 @@ class _RadioScreenState extends State<RadioScreen>
   RadioState _state = RadioState.disconnected;
   int _userCount = 0;
   int _roomCodeTaps = 0;
+  bool _muted = false;
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
@@ -65,7 +67,6 @@ class _RadioScreenState extends State<RadioScreen>
     log.info('RadioScreen init — sala: ${widget.roomCode}');
     await _radio.init();
 
-    // Verificar permiso de micrófono
     final status = await Permission.microphone.request();
     _hasMicPermission = status.isGranted;
 
@@ -79,6 +80,42 @@ class _RadioScreenState extends State<RadioScreen>
     if (_hasMicPermission) {
       await _radio.connect(widget.roomCode);
     }
+
+    // Iniciar foreground service para mantener conexión en segundo plano
+    await FlutterForegroundTask.startService(
+      serviceId: 1001,
+      notificationTitle: 'TalkIA — Sala ${widget.roomCode}',
+      notificationText: 'Conectado y escuchando',
+    );
+  }
+
+  Future<bool> _confirmExit() async {
+    if (_state == RadioState.disconnected) return true;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: const Text('¿Salir de la sala?',
+            style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          'Hay $_userCount ${_userCount == 1 ? 'usuario' : 'usuarios'} en la sala. ¿Confirmas que quieres salir?',
+          style: const TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('CANCELAR',
+                style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('SALIR',
+                style: TextStyle(color: AppTheme.transmitColor)),
+          ),
+        ],
+      ),
+    );
+    return confirm ?? false;
   }
 
   Future<void> _onPttStart() async {
@@ -135,6 +172,7 @@ class _RadioScreenState extends State<RadioScreen>
 
   @override
   void dispose() {
+    FlutterForegroundTask.stopService();
     _pulseCtrl.dispose();
     _waveCtrl.dispose();
     _stateSub?.cancel();
@@ -145,15 +183,26 @@ class _RadioScreenState extends State<RadioScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await _confirmExit()) {
+          await _radio.disconnect();
+          if (mounted) Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: AppTheme.surface,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: AppTheme.textSecondary),
           onPressed: () async {
-            await _radio.disconnect();
-            if (mounted) Navigator.of(context).pop();
+            if (await _confirmExit()) {
+              await _radio.disconnect();
+              if (mounted) Navigator.of(context).pop();
+            }
           },
         ),
         title: GestureDetector(
@@ -182,6 +231,19 @@ class _RadioScreenState extends State<RadioScreen>
           ),
         ),
         actions: [
+          // Botón mute
+          IconButton(
+            icon: Icon(
+              _muted ? Icons.volume_off : Icons.volume_up,
+              color: _muted ? AppTheme.transmitColor : AppTheme.textSecondary,
+              size: 20,
+            ),
+            tooltip: _muted ? 'Activar audio' : 'Silenciar audio entrante',
+            onPressed: () {
+              setState(() => _muted = !_muted);
+              _radio.muted = _muted;
+            },
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Row(
@@ -366,7 +428,7 @@ class _RadioScreenState extends State<RadioScreen>
           ),
         ],
       ),
-    );
+    )); // PopScope + Scaffold
   }
 }
 

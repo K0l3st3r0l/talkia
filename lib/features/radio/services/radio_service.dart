@@ -20,6 +20,7 @@ class RadioService {
   String _roomCode = '';
   int _userCount = 0;
   bool _disposed = false;
+  bool muted = false;
 
   RadioState _state = RadioState.disconnected;
 
@@ -76,7 +77,7 @@ class RadioService {
       log.info('audio chunk recibido: ${bytes.length} bytes');
       if (_state != RadioState.transmitting) {
         _setState(RadioState.receiving);
-        _audio.playChunk(bytes);
+        if (!muted) _audio.playChunk(bytes);
         Future.delayed(const Duration(milliseconds: 150), () {
           if (_state == RadioState.receiving) {
             _setState(RadioState.connected);

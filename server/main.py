@@ -9,6 +9,9 @@ import logging
 from collections import defaultdict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("talkia")
@@ -58,6 +61,10 @@ async def broadcast_bytes(room: str, data: bytes, exclude: WebSocket | None = No
     for ws in dead:
         rooms[room].discard(ws)
 
+
+@app.get("/")
+async def index():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
 
 @app.get("/health")
 async def health():
