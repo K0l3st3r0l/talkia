@@ -1,0 +1,15 @@
+services:
+  talkia-ota:
+    image: nginx:alpine
+    container_name: talkia-ota
+    restart: unless-stopped
+    ports:
+      - "3021:80"
+    volumes:
+      - ./releases:/usr/share/nginx/html:ro
+    networks:
+      - nginx-network
+
+networks:
+  nginx-network:
+    external: true

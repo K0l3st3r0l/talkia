@@ -1,0 +1,11 @@
+services:
+  talkia-server:
+    build: .
+    container_name: talkia-server
+    restart: unless-stopped
+    networks:
+      - nginx-network
+
+networks:
+  nginx-network:
+    external: true
