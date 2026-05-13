@@ -256,10 +256,11 @@ class _RadioScreenState extends State<RadioScreen>
                       ),
                     ),
 
-                  // Botón PTT
-                  GestureDetector(
-                    onLongPressStart: (_) => _onPttStart(),
-                    onLongPressEnd: (_) => _onPttEnd(),
+                  // Botón PTT — Listener captura pointerDown/Up sin delay ni condiciones
+                  Listener(
+                    onPointerDown: (_) => _onPttStart(),
+                    onPointerUp: (_) => _onPttEnd(),
+                    onPointerCancel: (_) => _onPttEnd(),
                     child: AnimatedBuilder(
                       animation: _pulseAnim,
                       builder: (_, child) {
@@ -316,7 +317,7 @@ class _RadioScreenState extends State<RadioScreen>
                         const Icon(Icons.touch_app, color: AppTheme.textSecondary, size: 20),
                         const SizedBox(height: 8),
                         const Text(
-                          'MANTÉN PRESIONADO PARA HABLAR',
+                          'PRESIONA PARA HABLAR',
                           style: TextStyle(
                             color: AppTheme.textSecondary,
                             fontSize: 11,

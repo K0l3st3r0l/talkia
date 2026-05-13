@@ -1,6 +1,6 @@
 {
-  "version": "1.0.4",
-  "build": 4,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=4",
-  "changelog": "Splash nítido en tablet: ícono centrado sobre fondo sólido"
+  "version": "1.0.5",
+  "build": 5,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=5",
+  "changelog": "Fix audio: usar AudioTrack nativo en lugar de just_audio para reproducción PCM"
 }
