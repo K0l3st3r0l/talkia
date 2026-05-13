@@ -1,6 +1,6 @@
 {
-  "version": "1.0.2",
-  "build": 2,
-  "url": "https://ota.laravas.com/talkia/talkia-latest.apk?v=2",
-  "changelog": "Consola de logs (triple-tap logo), versión en pantalla, botón buscar actualización"
+  "version": "1.0.3",
+  "build": 3,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=3",
+  "changelog": "Soporte pantallas grandes (tablet), splash fullscreen"
 }
