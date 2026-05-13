@@ -1,6 +1,6 @@
 {
-  "version": "1.0.6",
-  "build": 6,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=6",
-  "changelog": "Fix PTT: Listener en lugar de GestureDetector, cancela al soltar sin delay"
+  "version": "1.0.7",
+  "build": 7,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=7",
+  "changelog": "Fix audio mudo: ensurePlaying verifica playState, USAGE_MEDIA evita conflictos de volumen"
 }

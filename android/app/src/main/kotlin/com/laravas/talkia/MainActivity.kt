@@ -38,8 +38,12 @@ class MainActivity : FlutterActivity() {
             .build()
     }
 
-    // Garantiza que el AudioTrack existe y está reproduciendo
+    // Garantiza que el AudioTrack existe y está reproduciendo, y el volumen al máximo
     private fun ensurePlaying() {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
+
         val track = audioTrack
         if (track != null && track.state == AudioTrack.STATE_INITIALIZED) {
             if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
