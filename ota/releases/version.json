@@ -1,6 +1,6 @@
 {
-  "version": "1.0.1",
-  "build": 1,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=1",
-  "changelog": "Versión inicial — walkie-talkie PTT con icono y splash"
+  "version": "1.0.2",
+  "build": 2,
+  "url": "https://ota.laravas.com/talkia/talkia-latest.apk?v=2",
+  "changelog": "Consola de logs (triple-tap logo), versión en pantalla, botón buscar actualización"
 }
