@@ -48,7 +48,7 @@ cat > "$OTA_RELEASES/version.json" <<EOF
 {
   "version": "$VERSION",
   "build": $BUILD,
-  "url": "https://ota.laravas.com/talkia/talkia-latest.apk?v=$BUILD",
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=$BUILD",
   "changelog": "$CHANGELOG"
 }
 EOF
