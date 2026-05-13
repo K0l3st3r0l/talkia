@@ -188,9 +188,17 @@ class RadioService {
     _disposed = true;
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
-    await _audio.stopRecording();
-    await _wsSub?.cancel();
-    await _channel?.sink.close(ws_status.normalClosure);
+    try {
+      await _audio.stopRecording();
+    } catch (_) {}
+    try {
+      await _wsSub?.cancel();
+    } catch (_) {}
+    try {
+      await _channel?.sink.close(ws_status.normalClosure)
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {}
+    _channel = null;
     _setState(RadioState.disconnected);
   }
 

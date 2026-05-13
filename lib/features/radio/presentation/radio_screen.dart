@@ -77,16 +77,19 @@ class _RadioScreenState extends State<RadioScreen>
       if (mounted) setState(() => _userCount = c);
     });
 
-    if (_hasMicPermission) {
-      await _radio.connect(widget.roomCode);
-    }
+    // Conectar siempre — se puede escuchar sin micrófono
+    await _radio.connect(widget.roomCode);
 
     // Iniciar foreground service para mantener conexión en segundo plano
-    await FlutterForegroundTask.startService(
-      serviceId: 1001,
-      notificationTitle: 'TalkIA — Sala ${widget.roomCode}',
-      notificationText: 'Conectado y escuchando',
-    );
+    try {
+      await FlutterForegroundTask.startService(
+        serviceId: 1001,
+        notificationTitle: 'TalkIA — Sala ${widget.roomCode}',
+        notificationText: 'Conectado y escuchando',
+      );
+    } catch (e) {
+      log.warn('foreground service no pudo iniciar: $e');
+    }
   }
 
   Future<bool> _confirmExit() async {
