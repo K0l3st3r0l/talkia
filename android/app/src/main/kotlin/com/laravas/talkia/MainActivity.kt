@@ -14,16 +14,15 @@ class MainActivity : FlutterActivity() {
     private var audioTrack: AudioTrack? = null
     private val sampleRate = 16000
 
-    private fun ensureAudioTrack() {
-        if (audioTrack?.state == AudioTrack.STATE_INITIALIZED) return
+    private fun buildAudioTrack(): AudioTrack {
         val bufferSize = maxOf(
             AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT),
             8192
         )
-        audioTrack = AudioTrack.Builder()
+        return AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -37,7 +36,20 @@ class MainActivity : FlutterActivity() {
             .setBufferSizeInBytes(bufferSize * 4)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
-        audioTrack?.play()
+    }
+
+    // Garantiza que el AudioTrack existe y está reproduciendo
+    private fun ensurePlaying() {
+        val track = audioTrack
+        if (track != null && track.state == AudioTrack.STATE_INITIALIZED) {
+            if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                track.play()
+            }
+            return
+        }
+        // Crear nuevo track
+        track?.release()
+        audioTrack = buildAudioTrack().also { it.play() }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -51,14 +63,15 @@ class MainActivity : FlutterActivity() {
                 "setSpeakerMode" -> {
                     val enabled = call.argument<Boolean>("enabled") ?: true
                     val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    am.mode = if (enabled) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
-                    am.isSpeakerphoneOn = enabled
+                    // STREAM_MUSIC usa el altavoz por defecto; MODE_NORMAL evita conflictos de volumen
+                    am.mode = AudioManager.MODE_NORMAL
+                    am.isSpeakerphoneOn = false
                     result.success(null)
                 }
                 "playPcmChunk" -> {
                     val pcm = call.argument<ByteArray>("pcm")
                     if (pcm != null) {
-                        ensureAudioTrack()
+                        ensurePlaying()
                         audioTrack?.write(pcm, 0, pcm.size)
                         result.success(null)
                     } else {
