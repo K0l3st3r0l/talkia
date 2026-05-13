@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'core/theme/app_theme.dart';
 import 'features/ota_update/ota_service.dart';
 import 'features/radio/presentation/join_screen.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
+  final binding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: binding);
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -55,6 +57,7 @@ class _TalkIAAppState extends State<TalkIAApp> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      FlutterNativeSplash.remove();
       OtaService().checkAndUpdate();
     });
   }
