@@ -1,6 +1,6 @@
 {
-  "version": "1.0.3",
-  "build": 3,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=3",
-  "changelog": "Soporte pantallas grandes (tablet), splash fullscreen"
+  "version": "1.0.4",
+  "build": 4,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=4",
+  "changelog": "Splash nítido en tablet: ícono centrado sobre fondo sólido"
 }
