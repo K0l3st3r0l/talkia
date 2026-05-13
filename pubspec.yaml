@@ -2,7 +2,7 @@ name: talkia
 description: "TalkIA — Walkie-talkie app con Flutter"
 publish_to: 'none'
 
-version: 1.0.4+4
+version: 1.0.5+5
 
 environment:
   sdk: ^3.8.0
@@ -13,7 +13,6 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^2.5.1
   record: ^5.1.2
-  just_audio: ^0.9.40
   web_socket_channel: ^3.0.1
   flutter_foreground_task: ^8.14.0
   permission_handler: ^11.3.1
