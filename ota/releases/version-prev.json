@@ -1,6 +1,6 @@
 {
-  "version": "1.0.17",
-  "build": 17,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=17",
-  "changelog": "Estabilidad conexion: pong timeout + reconexion automatica al cambiar red WiFi/movil"
+  "version": "1.0.19",
+  "build": 19,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=19",
+  "changelog": "Fix duplicados en sala; codec Opus (10x menos datos, mejor calidad en redes debiles)"
 }

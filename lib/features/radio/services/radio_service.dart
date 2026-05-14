@@ -214,10 +214,11 @@ class RadioService {
   void _startPing() {
     _pingTimer?.cancel();
     _pendingPong = false;
-    _pingTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+    _pingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (_pendingPong) {
-        // El ping anterior no recibió pong — conexión muerta
         log.warn('Pong timeout — reconectando');
+        _pingTimer?.cancel();
+        _pendingPong = false;
         _onDisconnected();
         return;
       }
