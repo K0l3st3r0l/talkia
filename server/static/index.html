@@ -24,7 +24,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 20px;
+    gap: 16px;
     width: 100%;
     max-width: 320px;
   }
@@ -39,22 +39,39 @@
   h1 { font-size: 32px; font-weight: 700; letter-spacing: 4px; color: #fff; }
   .subtitle { font-size: 13px; color: #666; }
   .version { font-size: 11px; color: #444; }
-  input[type=text] {
+  input[type=text], input[type=password] {
     width: 100%;
     background: #1A1A2E;
     border: 1px solid #444;
     border-radius: 12px;
     color: #fff;
+    outline: none;
+  }
+  input[type=text] {
     font-size: 22px;
     font-weight: 700;
     letter-spacing: 6px;
     text-align: center;
     padding: 14px;
-    outline: none;
     text-transform: uppercase;
   }
   input[type=text]:focus { border-color: #00BCD4; border-width: 2px; }
   input[type=text]::placeholder { font-size: 13px; letter-spacing: 3px; color: #444; font-weight: 400; }
+  input[type=password] {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+  input[type=password]:focus { border-color: #00BCD4; border-width: 2px; }
+  input[type=password]::placeholder { color: #444; font-weight: 400; }
+
+  #password-wrap {
+    width: 100%;
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.25s ease;
+  }
+  #password-wrap.visible { max-height: 60px; }
+
   .btn-primary {
     width: 100%;
     background: #00BCD4;
@@ -66,6 +83,7 @@
     border-radius: 12px;
     padding: 16px;
     cursor: pointer;
+    margin-top: 4px;
   }
   .btn-primary:disabled { opacity: 0.5; }
   .hint { font-size: 12px; color: #555; text-align: center; line-height: 1.6; }
@@ -124,12 +142,7 @@
 
   /* PTT button */
   .ptt-wrap { position: relative; width: 180px; height: 180px; display: flex; align-items: center; justify-content: center; }
-  .ptt-rings {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    pointer-events: none;
-  }
+  .ptt-rings { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; }
   .ptt-ring {
     position: absolute;
     border-radius: 50%;
@@ -152,24 +165,11 @@
     transition: all 0.2s;
   }
   #ptt svg { width: 72px; height: 72px; fill: #555; transition: fill 0.2s; }
-  #ptt.transmitting {
-    background: rgba(255,82,82,0.15);
-    border-color: #FF5252;
-    border-width: 4px;
-    box-shadow: 0 0 30px rgba(255,82,82,0.4);
-  }
+  #ptt.transmitting { background: rgba(255,82,82,0.15); border-color: #FF5252; border-width: 4px; box-shadow: 0 0 30px rgba(255,82,82,0.4); }
   #ptt.transmitting svg { fill: #FF5252; }
-  #ptt.receiving {
-    background: rgba(76,175,80,0.15);
-    border-color: #4CAF50;
-    border-width: 4px;
-    box-shadow: 0 0 30px rgba(76,175,80,0.4);
-  }
+  #ptt.receiving { background: rgba(76,175,80,0.15); border-color: #4CAF50; border-width: 4px; box-shadow: 0 0 30px rgba(76,175,80,0.4); }
   #ptt.receiving svg { fill: #4CAF50; }
-  #ptt.connected {
-    background: rgba(0,188,212,0.15);
-    border-color: #00BCD4;
-  }
+  #ptt.connected { background: rgba(0,188,212,0.15); border-color: #00BCD4; }
   #ptt.connected svg { fill: #00BCD4; }
 
   @keyframes ring-out {
@@ -182,7 +182,33 @@
 
   .ptt-hint { font-size: 11px; letter-spacing: 2px; color: #555; text-align: center; min-height: 18px; }
 
-  .footer { padding-bottom: 24px; font-size: 12px; color: #444; }
+  /* Volume slider */
+  .volume-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 0 24px;
+  }
+  .volume-row span { font-size: 11px; color: #555; min-width: 36px; text-align: right; }
+  .volume-row svg { width: 18px; height: 18px; fill: #555; flex-shrink: 0; }
+  input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: #1A1A2E;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: #00BCD4;
+    cursor: pointer;
+  }
+
+  .footer { padding-bottom: 16px; font-size: 12px; color: #444; }
 
   /* Confirm dialog */
   .overlay {
@@ -193,18 +219,28 @@
     z-index: 100;
   }
   .overlay.visible { display: flex; }
-  .dialog {
-    background: #1A1A2E;
-    border-radius: 16px;
-    padding: 24px;
-    max-width: 300px;
-    width: 90%;
-  }
+  .dialog { background: #1A1A2E; border-radius: 16px; padding: 24px; max-width: 300px; width: 90%; }
   .dialog h3 { color: #fff; margin-bottom: 10px; }
   .dialog p { color: #888; font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
   .dialog-buttons { display: flex; gap: 12px; justify-content: flex-end; }
   .btn-cancel { background: none; border: none; color: #888; font-size: 13px; letter-spacing: 1px; cursor: pointer; padding: 8px 12px; }
   .btn-confirm { background: none; border: none; color: #FF5252; font-size: 13px; font-weight: 700; letter-spacing: 1px; cursor: pointer; padding: 8px 12px; }
+
+  /* Toast */
+  #toast {
+    display: none;
+    position: fixed;
+    bottom: 32px;
+    left: 50%; transform: translateX(-50%);
+    background: #FF5252;
+    color: #fff;
+    font-size: 13px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    z-index: 200;
+    max-width: 90%;
+    text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -216,8 +252,14 @@
   </div>
   <h1>TalkIA</h1>
   <p class="subtitle">Walkie-talkie digital</p>
-  <p class="version" id="ver"></p>
+  <p class="version">Web v1.1</p>
+
   <input type="text" id="room-input" maxlength="12" placeholder="CÓDIGO DE SALA" autocomplete="off" autocorrect="off" spellcheck="false">
+
+  <div id="password-wrap">
+    <input type="password" id="password-input" maxlength="64" placeholder="Contraseña de admin (solo para crear sala)" autocomplete="off">
+  </div>
+
   <button class="btn-primary" id="btn-join">CONECTAR</button>
   <p class="hint">Todos los dispositivos en el mismo código<br>pueden escucharse entre sí</p>
 </div>
@@ -260,6 +302,13 @@
     <p class="ptt-hint" id="ptt-hint">PRESIONA PARA HABLAR</p>
   </div>
 
+  <div class="volume-row">
+    <svg viewBox="0 0 24 24"><path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5zm7-.17v6.34L9.83 13H7v-2h2.83L12 8.83z"/></svg>
+    <input type="range" id="volume-slider" min="0" max="100" value="100">
+    <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+    <span id="volume-pct">100%</span>
+  </div>
+
   <div class="footer" id="footer">Solo tú en la sala</div>
 </div>
 
@@ -275,43 +324,75 @@
   </div>
 </div>
 
+<div id="toast"></div>
+
 <script>
 const WS_BASE = 'wss://talkia.laravas.com/ws';
+const DEFAULT_ROOM = '76961';
 const SAMPLE_RATE = 16000;
 
 // ── State ──────────────────────────────────────────────────────────────────────
 let ws = null;
 let roomCode = '';
-let state = 'disconnected'; // disconnected|connecting|connected|transmitting|receiving
+let roomPassword = '';
+let state = 'disconnected';
 let userCount = 1;
 let muted = false;
 let transmitting = false;
+let reconnectAllowed = true;
+let volume = 1.0;
 
 // Audio
 let audioCtx = null;
+let gainNode = null;
 let mediaStream = null;
 let scriptProcessor = null;
-let playQueue = [];
 let playTime = 0;
 
 // ── UI refs ───────────────────────────────────────────────────────────────────
-const joinEl    = document.getElementById('join');
-const radioEl   = document.getElementById('radio');
-const roomInput = document.getElementById('room-input');
-const btnJoin   = document.getElementById('btn-join');
-const btnBack   = document.getElementById('btn-back');
-const btnMute   = document.getElementById('btn-mute');
-const ptt       = document.getElementById('ptt');
-const statusDot = document.getElementById('status-dot');
-const statusTxt = document.getElementById('status-text');
-const displayRoom = document.getElementById('display-room');
-const userCountEl = document.getElementById('user-count');
-const footerEl  = document.getElementById('footer');
-const pttHint   = document.getElementById('ptt-hint');
-const overlay   = document.getElementById('overlay');
-const ring1 = document.getElementById('ring1');
-const ring2 = document.getElementById('ring2');
-const ring3 = document.getElementById('ring3');
+const joinEl       = document.getElementById('join');
+const radioEl      = document.getElementById('radio');
+const roomInput    = document.getElementById('room-input');
+const passwordInput= document.getElementById('password-input');
+const passwordWrap = document.getElementById('password-wrap');
+const btnJoin      = document.getElementById('btn-join');
+const btnBack      = document.getElementById('btn-back');
+const btnMute      = document.getElementById('btn-mute');
+const ptt          = document.getElementById('ptt');
+const statusDot    = document.getElementById('status-dot');
+const statusTxt    = document.getElementById('status-text');
+const displayRoom  = document.getElementById('display-room');
+const userCountEl  = document.getElementById('user-count');
+const footerEl     = document.getElementById('footer');
+const pttHint      = document.getElementById('ptt-hint');
+const overlay      = document.getElementById('overlay');
+const ring1        = document.getElementById('ring1');
+const ring2        = document.getElementById('ring2');
+const ring3        = document.getElementById('ring3');
+const volumeSlider = document.getElementById('volume-slider');
+const volumePct    = document.getElementById('volume-pct');
+const toastEl      = document.getElementById('toast');
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 4000);
+}
+
+// ── Password field visibility ─────────────────────────────────────────────────
+function updatePasswordVisibility() {
+  const code = roomInput.value.trim().toUpperCase();
+  const needs = code !== DEFAULT_ROOM && code.length > 0;
+  passwordWrap.classList.toggle('visible', needs);
+  if (!needs) passwordInput.value = '';
+}
+roomInput.addEventListener('input', () => {
+  roomInput.value = roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  updatePasswordVisibility();
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function setState(s) {
@@ -321,18 +402,17 @@ function setState(s) {
   statusDot.style.background = colors[s] || '#555';
   statusTxt.textContent = labels[s] || s.toUpperCase();
   statusTxt.style.color = colors[s] || '#555';
-
   ptt.className = s === 'transmitting' ? 'transmitting' : s === 'receiving' ? 'receiving' : s === 'connected' ? 'connected' : '';
-
   const active = s === 'transmitting' || s === 'receiving';
-  [ring1, ring2, ring3].forEach(r => r.classList.toggle('active', active));
   const ringColor = s === 'transmitting' ? '#FF5252' : '#4CAF50';
-  [ring1, ring2, ring3].forEach(r => r.style.color = active ? ringColor : 'transparent');
-
-  if (s === 'connected')    pttHint.textContent = 'PRESIONA PARA HABLAR';
+  [ring1, ring2, ring3].forEach(r => {
+    r.classList.toggle('active', active);
+    r.style.color = active ? ringColor : 'transparent';
+  });
+  if (s === 'connected')         pttHint.textContent = 'PRESIONA PARA HABLAR';
   else if (s === 'transmitting') pttHint.textContent = 'SUELTA PARA TERMINAR';
   else if (s === 'receiving')    pttHint.textContent = 'ESCUCHANDO...';
-  else pttHint.textContent = '';
+  else                           pttHint.textContent = '';
 }
 
 function updateUsers(count) {
@@ -343,9 +423,12 @@ function updateUsers(count) {
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
-function connect(room) {
+function connect(room, password) {
   setState('connecting');
-  ws = new WebSocket(`${WS_BASE}/${room}`);
+  const url = password
+    ? `${WS_BASE}/${room}?password=${encodeURIComponent(password)}`
+    : `${WS_BASE}/${room}`;
+  ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => setState('connected');
@@ -364,12 +447,20 @@ function connect(room) {
       if (['welcome','user_joined','user_left'].includes(msg.type)) updateUsers(msg.count);
       if (msg.type === 'ptt_start' && state !== 'transmitting') setState('receiving');
       if (msg.type === 'ptt_end' && state === 'receiving') setState('connected');
+      if (msg.type === 'error') {
+        reconnectAllowed = false;
+        ws.close();
+        leaveRoom();
+        showToast('Sala nueva — se requiere contraseña de administrador para crearla');
+      }
     } catch(_) {}
   };
 
   ws.onclose = () => {
     setState('disconnected');
-    if (radioEl.style.display !== 'none') setTimeout(() => connect(room), 3000);
+    if (reconnectAllowed && radioEl.style.display !== 'none') {
+      setTimeout(() => connect(room, password), 3000);
+    }
   };
 
   ws.onerror = () => ws.close();
@@ -379,6 +470,9 @@ function connect(room) {
 function getAudioCtx() {
   if (!audioCtx || audioCtx.state === 'closed') {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    gainNode = audioCtx.createGain();
+    gainNode.gain.value = volume;
+    gainNode.connect(audioCtx.destination);
   }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
@@ -388,37 +482,30 @@ function playPcm(int16Samples) {
   const ctx = getAudioCtx();
   const float32 = new Float32Array(int16Samples.length);
   for (let i = 0; i < int16Samples.length; i++) float32[i] = int16Samples[i] / 32768;
-
   const buf = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
   buf.copyToChannel(float32, 0);
-
   const src = ctx.createBufferSource();
   src.buffer = buf;
-  src.connect(ctx.destination);
-
+  src.connect(gainNode);
   const now = ctx.currentTime;
   const startAt = Math.max(now, playTime);
   src.start(startAt);
   playTime = startAt + buf.duration;
 }
 
-// ── Recording (ScriptProcessorNode) ──────────────────────────────────────────
+// ── Recording ─────────────────────────────────────────────────────────────────
 async function startRecording() {
   const ctx = getAudioCtx();
   mediaStream = await navigator.mediaDevices.getUserMedia({ audio: {
     sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true, noiseSuppression: true
   }});
-
   const src = ctx.createMediaStreamSource(mediaStream);
-  // ScriptProcessor para convertir float32 → int16 y enviar
   scriptProcessor = ctx.createScriptProcessor(2048, 1, 1);
   scriptProcessor.onaudioprocess = (e) => {
     if (!transmitting || !ws || ws.readyState !== WebSocket.OPEN) return;
     const f32 = e.inputBuffer.getChannelData(0);
     const int16 = new Int16Array(f32.length);
-    for (let i = 0; i < f32.length; i++) {
-      int16[i] = Math.max(-32768, Math.min(32767, f32[i] * 32768));
-    }
+    for (let i = 0; i < f32.length; i++) int16[i] = Math.max(-32768, Math.min(32767, f32[i] * 32768));
     ws.send(int16.buffer);
   };
   src.connect(scriptProcessor);
@@ -449,24 +536,33 @@ function onPttUp() {
   setState('connected');
 }
 
-ptt.addEventListener('pointerdown', (e) => { e.preventDefault(); onPttDown(); });
-ptt.addEventListener('pointerup',   (e) => { e.preventDefault(); onPttUp(); });
-ptt.addEventListener('pointercancel',(e)=> { e.preventDefault(); onPttUp(); });
-ptt.addEventListener('pointerleave',(e) => { if (transmitting) { e.preventDefault(); onPttUp(); } });
+ptt.addEventListener('pointerdown',  (e) => { e.preventDefault(); onPttDown(); });
+ptt.addEventListener('pointerup',    (e) => { e.preventDefault(); onPttUp(); });
+ptt.addEventListener('pointercancel',(e) => { e.preventDefault(); onPttUp(); });
+ptt.addEventListener('pointerleave', (e) => { if (transmitting) { e.preventDefault(); onPttUp(); } });
+
+// ── Volume ────────────────────────────────────────────────────────────────────
+volumeSlider.addEventListener('input', () => {
+  volume = volumeSlider.value / 100;
+  volumePct.textContent = `${volumeSlider.value}%`;
+  if (gainNode) gainNode.gain.value = volume;
+});
 
 // ── Join / Leave ──────────────────────────────────────────────────────────────
-function enterRoom(room) {
+function enterRoom(room, password) {
   roomCode = room.toUpperCase().trim();
+  roomPassword = password || '';
+  reconnectAllowed = true;
   displayRoom.textContent = roomCode;
   joinEl.style.display = 'none';
   radioEl.style.display = 'flex';
   playTime = 0;
-  connect(roomCode);
-  // Guardar última sala
+  connect(roomCode, roomPassword);
   localStorage.setItem('last_room', roomCode);
 }
 
 function leaveRoom() {
+  reconnectAllowed = false;
   transmitting = false;
   stopRecording();
   ws?.close();
@@ -487,7 +583,6 @@ document.getElementById('btn-confirm-exit').addEventListener('click', () => {
   overlay.classList.remove('visible');
   leaveRoom();
 });
-
 btnBack.addEventListener('click', () => {
   if (userCount > 1 || state === 'connected') showExitConfirm();
   else leaveRoom();
@@ -504,21 +599,17 @@ btnMute.addEventListener('click', () => {
 btnJoin.addEventListener('click', () => {
   const code = roomInput.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!code) return;
-  enterRoom(code);
+  const password = passwordWrap.classList.contains('visible') ? passwordInput.value.trim() : '';
+  enterRoom(code, password);
 });
-roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') btnJoin.click(); });
-roomInput.addEventListener('input', () => {
-  roomInput.value = roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-});
+roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { passwordWrap.classList.contains('visible') ? passwordInput.focus() : btnJoin.click(); } });
+passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') btnJoin.click(); });
 
-// Cargar última sala guardada
-const lastRoom = localStorage.getItem('last_room');
-if (lastRoom) roomInput.value = lastRoom;
+// Cargar última sala o default
+const lastRoom = localStorage.getItem('last_room') || DEFAULT_ROOM;
+roomInput.value = lastRoom;
+updatePasswordVisibility();
 
-// Versión
-document.getElementById('ver').textContent = 'Web v1.0';
-
-// Prevenir scroll/zoom en móvil al tocar el botón
 document.addEventListener('touchmove', e => { if (e.target === ptt) e.preventDefault(); }, { passive: false });
 </script>
 </body>
