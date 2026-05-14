@@ -33,8 +33,8 @@ void _initForegroundTask() {
       channelId: 'talkia_channel',
       channelName: 'TalkIA',
       channelDescription: 'TalkIA activo — escuchando canal',
-      channelImportance: NotificationChannelImportance.DEFAULT,
-      priority: NotificationPriority.DEFAULT,
+      channelImportance: NotificationChannelImportance.HIGH,
+      priority: NotificationPriority.HIGH,
     ),
     iosNotificationOptions: const IOSNotificationOptions(),
     foregroundTaskOptions: ForegroundTaskOptions(

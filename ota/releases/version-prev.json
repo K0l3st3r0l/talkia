@@ -1,7 +1,7 @@
 {
-  "version": "1.0.24",
-  "build": 24,
-  "min_build": 24,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=24",
-  "changelog": "solicitar exclusión de optimización de batería para evitar desconexiones en segundo plano"
+  "version": "1.0.25",
+  "build": 25,
+  "min_build": 25,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=25",
+  "changelog": "reducir delay de reconexión de 3s a 1s para roaming WiFi más rápido"
 }
