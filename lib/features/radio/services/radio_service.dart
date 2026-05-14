@@ -207,7 +207,7 @@ class RadioService {
 
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 3), () {
+    _reconnectTimer = Timer(const Duration(seconds: 1), () {
       if (!_disposed && _roomCode.isNotEmpty) _connect();
     });
   }
