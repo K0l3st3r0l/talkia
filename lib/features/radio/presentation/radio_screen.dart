@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../../core/constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/log_service.dart';
 import '../../debug/log_screen.dart';
@@ -102,6 +103,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     });
     _errorSub = _radio.errorStream.listen((code) {
       if (!mounted) return;
+      if (code == 'update_required') {
+        _showUpdateRequiredDialog();
+        return;
+      }
       const msg = 'Sala nueva — se requiere contraseña de administrador para crearla';
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text(msg), backgroundColor: AppTheme.transmitColor),
@@ -145,6 +150,102 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     if (update == null) return;
     setState(() => _hasUpdate = false);
     await OtaService().downloadAndInstall(update.apkUrl);
+  }
+
+  void _showUpdateRequiredDialog() {
+    double? progress;
+    bool downloading = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            backgroundColor: AppTheme.surface,
+            title: const Row(
+              children: [
+                Icon(Icons.system_update, color: AppTheme.accent),
+                SizedBox(width: 10),
+                Text(
+                  'Actualización requerida',
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 17),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Esta versión ya no es compatible con el servidor. Descarga la nueva versión para continuar.',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.5),
+                ),
+                if (downloading) ...[
+                  const SizedBox(height: 16),
+                  LinearProgressIndicator(
+                    value: progress,
+                    color: AppTheme.accent,
+                    backgroundColor: AppTheme.background,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    progress != null
+                        ? 'Descargando… ${(progress! * 100).toStringAsFixed(0)}%'
+                        : 'Descargando…',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              if (!downloading)
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      setDialogState(() => downloading = true);
+                      try {
+                        final result = await OtaService().checkForUpdate();
+                        final url = result?.apkUrl ?? kOtaApkUrl;
+                        await OtaService().downloadAndInstall(
+                          url,
+                          onProgress: (received, total) {
+                            if (total > 0) {
+                              setDialogState(() => progress = received / total);
+                            }
+                          },
+                        );
+                      } catch (e) {
+                        setDialogState(() {
+                          downloading = false;
+                          progress = null;
+                        });
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Error al descargar: $e'), backgroundColor: AppTheme.transmitColor),
+                          );
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.accent,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.download, size: 18),
+                    label: const Text(
+                      'DESCARGAR ACTUALIZACIÓN',
+                      style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<bool> _confirmExit() async {

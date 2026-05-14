@@ -92,6 +92,7 @@ class RadioService {
       final params = <String, String>{
         'name': Uri.encodeComponent(_userName),
         'codec': 'opus',
+        'build': kAppBuild.toString(),
       };
       if (_password.isNotEmpty) params['password'] = Uri.encodeComponent(_password);
       final query = params.entries.map((e) => '${e.key}=${e.value}').join('&');

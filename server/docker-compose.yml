@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-talkia2026}
+      - MIN_BUILD=${MIN_BUILD:-0}
     networks:
       - nginx-network
 

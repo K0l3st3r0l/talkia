@@ -20,6 +20,8 @@ class _JoinScreenState extends State<JoinScreen> {
   final _passwordCtrl = TextEditingController();
   bool _obscurePassword = true;
   bool _checkingOta = false;
+  bool _downloadingForced = false;
+  double? _downloadProgress;
   String _version = '';
   int _logoTaps = 0;
 
@@ -35,6 +37,7 @@ class _JoinScreenState extends State<JoinScreen> {
     _roomCtrl.addListener(() => setState(() {}));
     _loadPrefs();
     _loadVersion();
+    _autoCheckForced();
   }
 
   Future<void> _loadVersion() async {
@@ -48,6 +51,113 @@ class _JoinScreenState extends State<JoinScreen> {
       _logoTaps = 0;
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LogScreen()));
     }
+  }
+
+  Future<void> _autoCheckForced() async {
+    try {
+      final result = await OtaService().checkForUpdate();
+      if (!mounted || result == null || !result.isForced) return;
+      _showForcedUpdateDialog(result);
+    } catch (_) {}
+  }
+
+  void _showForcedUpdateDialog(OtaCheckResult result) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            backgroundColor: AppTheme.surface,
+            title: const Row(
+              children: [
+                Icon(Icons.system_update, color: AppTheme.accent),
+                SizedBox(width: 10),
+                Text(
+                  'Actualización requerida',
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 18),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Esta versión ya no es compatible. Debes actualizar para continuar.',
+                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                ),
+                if (result.changelog.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    result.changelog,
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                if (_downloadingForced) ...[
+                  LinearProgressIndicator(
+                    value: _downloadProgress,
+                    color: AppTheme.accent,
+                    backgroundColor: AppTheme.background,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _downloadProgress != null
+                        ? '${(_downloadProgress! * 100).toStringAsFixed(0)}%'
+                        : 'Descargando…',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              if (!_downloadingForced)
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      setDialogState(() {
+                        _downloadingForced = true;
+                        _downloadProgress = null;
+                      });
+                      try {
+                        await OtaService().downloadAndInstall(
+                          result.apkUrl,
+                          onProgress: (received, total) {
+                            if (total > 0) {
+                              setDialogState(() {
+                                _downloadProgress = received / total;
+                              });
+                            }
+                          },
+                        );
+                      } catch (e) {
+                        setDialogState(() {
+                          _downloadingForced = false;
+                          _downloadProgress = null;
+                        });
+                        if (mounted) _showSnack('Error al descargar: $e', isError: true);
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.accent,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.download, size: 18),
+                    label: const Text(
+                      'ACTUALIZAR AHORA',
+                      style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _checkOta() async {

@@ -1,6 +1,7 @@
 {
-  "version": "1.0.19",
-  "build": 19,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=19",
-  "changelog": "Fix duplicados en sala; codec Opus (10x menos datos, mejor calidad en redes debiles)"
+  "version": "1.0.20",
+  "build": 20,
+  "min_build": 20,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=20",
+  "changelog": "reducir ping a 10s para evitar desconexiones por inactividad"
 }

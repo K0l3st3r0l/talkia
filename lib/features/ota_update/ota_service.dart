@@ -10,13 +10,17 @@ class OtaCheckResult {
   final int localBuild;
   final int serverBuild;
   final bool hasUpdate;
+  final bool isForced;
   final String apkUrl;
+  final String changelog;
 
   OtaCheckResult({
     required this.localBuild,
     required this.serverBuild,
     required this.hasUpdate,
+    required this.isForced,
     required this.apkUrl,
+    required this.changelog,
   });
 }
 
@@ -37,14 +41,18 @@ class OtaService {
 
       final res = await _dio.get(kOtaVersionUrl);
       final serverBuild = res.data['build'] as int? ?? 0;
+      final minBuild = res.data['min_build'] as int? ?? 0;
       final apkUrl = res.data['url'] as String? ?? kOtaApkUrl;
-      log.info('OTA server build: $serverBuild');
+      final changelog = res.data['changelog'] as String? ?? '';
+      log.info('OTA server build: $serverBuild, min_build: $minBuild');
 
       return OtaCheckResult(
         localBuild: localBuild,
         serverBuild: serverBuild,
         hasUpdate: serverBuild > localBuild,
+        isForced: localBuild < minBuild,
         apkUrl: apkUrl,
+        changelog: changelog,
       );
     } catch (e) {
       log.error('OTA check falló', e);

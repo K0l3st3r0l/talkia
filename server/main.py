@@ -26,6 +26,7 @@ app.add_middleware(
 )
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "talkia2026")
+MIN_BUILD = int(os.environ.get("MIN_BUILD", "0"))
 OPEN_ROOMS = {"76961"}
 
 # Parámetros Opus — deben coincidir con el cliente Android
@@ -146,12 +147,19 @@ async def websocket_endpoint(
     password: str = Query(default=""),
     name: str = Query(default="Usuario"),
     codec: str = Query(default="pcm"),
+    build: int = Query(default=0),
 ):
     room_code = room_code.upper().strip()
     display_name = name.strip()[:32] or "Usuario"
     client_codec_val = codec if codec in ("opus", "pcm") else "pcm"
 
     await ws.accept()
+
+    if MIN_BUILD > 0 and build < MIN_BUILD:
+        log.warning(f"[{room_code}] '{display_name}' rechazado — build {build} < min {MIN_BUILD}")
+        await ws.send_text(json.dumps({"type": "error", "code": "update_required"}))
+        await ws.close()
+        return
 
     is_new_room = room_code not in rooms or len(rooms[room_code]) == 0
     if is_new_room and room_code not in OPEN_ROOMS:
