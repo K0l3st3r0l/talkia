@@ -19,12 +19,12 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* ── Join screen ── */
+  /* ── Join ── */
   #join {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
     width: 100%;
     max-width: 320px;
   }
@@ -38,7 +38,7 @@
   .logo svg { width: 44px; height: 44px; fill: #00BCD4; }
   h1 { font-size: 32px; font-weight: 700; letter-spacing: 4px; color: #fff; }
   .subtitle { font-size: 13px; color: #666; }
-  .version { font-size: 11px; color: #444; }
+
   input[type=text], input[type=password] {
     width: 100%;
     background: #1A1A2E;
@@ -46,23 +46,20 @@
     border-radius: 12px;
     color: #fff;
     outline: none;
+    padding: 12px 14px;
+    font-size: 15px;
   }
-  input[type=text] {
+  input[type=text]:focus, input[type=password]:focus { border-color: #00BCD4; border-width: 2px; }
+  input::placeholder { color: #444; }
+  #room-input {
     font-size: 22px;
     font-weight: 700;
     letter-spacing: 6px;
     text-align: center;
-    padding: 14px;
     text-transform: uppercase;
+    padding: 14px;
   }
-  input[type=text]:focus { border-color: #00BCD4; border-width: 2px; }
-  input[type=text]::placeholder { font-size: 13px; letter-spacing: 3px; color: #444; font-weight: 400; }
-  input[type=password] {
-    font-size: 16px;
-    padding: 12px 14px;
-  }
-  input[type=password]:focus { border-color: #00BCD4; border-width: 2px; }
-  input[type=password]::placeholder { color: #444; font-weight: 400; }
+  #room-input::placeholder { font-size: 13px; letter-spacing: 3px; font-weight: 400; }
 
   #password-wrap {
     width: 100%;
@@ -85,10 +82,9 @@
     cursor: pointer;
     margin-top: 4px;
   }
-  .btn-primary:disabled { opacity: 0.5; }
   .hint { font-size: 12px; color: #555; text-align: center; line-height: 1.6; }
 
-  /* ── Radio screen ── */
+  /* ── Radio ── */
   #radio {
     display: none;
     flex-direction: column;
@@ -96,7 +92,6 @@
     width: 100%;
     max-width: 400px;
     height: 100dvh;
-    padding: 0;
   }
   .topbar {
     width: 100%;
@@ -126,9 +121,37 @@
     gap: 8px;
     font-size: 12px;
     font-weight: 700;
-    letter-spacing: 3px;
+    letter-spacing: 2px;
   }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+
+  /* Users row */
+  #users-row {
+    width: 100%;
+    padding: 8px 12px;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    min-height: 36px;
+  }
+  #users-row::-webkit-scrollbar { display: none; }
+  .user-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: #1A1A2E;
+    border: 1.5px solid transparent;
+    font-size: 12px;
+    color: #888;
+    white-space: nowrap;
+    transition: all 0.2s;
+  }
+  .user-chip.me { border-color: rgba(0,188,212,0.5); color: #00BCD4; }
+  .user-chip.speaking { background: rgba(76,175,80,0.15); border-color: #4CAF50; color: #4CAF50; font-weight: 700; }
+  .user-chip .mic-icon { font-size: 10px; }
 
   .main-area {
     flex: 1;
@@ -136,33 +159,19 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 40px;
+    gap: 32px;
     width: 100%;
   }
 
-  /* PTT button */
   .ptt-wrap { position: relative; width: 180px; height: 180px; display: flex; align-items: center; justify-content: center; }
   .ptt-rings { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; }
-  .ptt-ring {
-    position: absolute;
-    border-radius: 50%;
-    border: 2px solid currentColor;
-    opacity: 0;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-  }
+  .ptt-ring { position: absolute; border-radius: 50%; border: 2px solid currentColor; opacity: 0; top: 50%; left: 50%; transform: translate(-50%, -50%); }
   #ptt {
-    width: 160px; height: 160px;
-    border-radius: 50%;
-    background: rgba(85,85,85,0.15);
-    border: 2px solid #555;
+    width: 160px; height: 160px; border-radius: 50%;
+    background: rgba(85,85,85,0.15); border: 2px solid #555;
     display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    position: relative;
-    z-index: 1;
-    user-select: none;
-    -webkit-user-select: none;
-    transition: all 0.2s;
+    cursor: pointer; position: relative; z-index: 1;
+    user-select: none; -webkit-user-select: none; transition: all 0.2s;
   }
   #ptt svg { width: 72px; height: 72px; fill: #555; transition: fill 0.2s; }
   #ptt.transmitting { background: rgba(255,82,82,0.15); border-color: #FF5252; border-width: 4px; box-shadow: 0 0 30px rgba(255,82,82,0.4); }
@@ -182,42 +191,16 @@
 
   .ptt-hint { font-size: 11px; letter-spacing: 2px; color: #555; text-align: center; min-height: 18px; }
 
-  /* Volume slider */
-  .volume-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 0 24px;
-  }
+  /* Volume */
+  .volume-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0 24px; }
   .volume-row span { font-size: 11px; color: #555; min-width: 36px; text-align: right; }
   .volume-row svg { width: 18px; height: 18px; fill: #555; flex-shrink: 0; }
-  input[type=range] {
-    flex: 1;
-    -webkit-appearance: none;
-    height: 4px;
-    border-radius: 2px;
-    background: #1A1A2E;
-    outline: none;
-  }
-  input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 16px; height: 16px;
-    border-radius: 50%;
-    background: #00BCD4;
-    cursor: pointer;
-  }
+  input[type=range] { flex: 1; -webkit-appearance: none; height: 4px; border-radius: 2px; background: #1A1A2E; outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #00BCD4; cursor: pointer; }
 
   .footer { padding-bottom: 16px; font-size: 12px; color: #444; }
 
-  /* Confirm dialog */
-  .overlay {
-    display: none;
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.7);
-    align-items: center; justify-content: center;
-    z-index: 100;
-  }
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 100; }
   .overlay.visible { display: flex; }
   .dialog { background: #1A1A2E; border-radius: 16px; padding: 24px; max-width: 300px; width: 90%; }
   .dialog h3 { color: #fff; margin-bottom: 10px; }
@@ -226,21 +209,7 @@
   .btn-cancel { background: none; border: none; color: #888; font-size: 13px; letter-spacing: 1px; cursor: pointer; padding: 8px 12px; }
   .btn-confirm { background: none; border: none; color: #FF5252; font-size: 13px; font-weight: 700; letter-spacing: 1px; cursor: pointer; padding: 8px 12px; }
 
-  /* Toast */
-  #toast {
-    display: none;
-    position: fixed;
-    bottom: 32px;
-    left: 50%; transform: translateX(-50%);
-    background: #FF5252;
-    color: #fff;
-    font-size: 13px;
-    padding: 12px 20px;
-    border-radius: 8px;
-    z-index: 200;
-    max-width: 90%;
-    text-align: center;
-  }
+  #toast { display: none; position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: #FF5252; color: #fff; font-size: 13px; padding: 12px 20px; border-radius: 8px; z-index: 200; max-width: 90%; text-align: center; }
 </style>
 </head>
 <body>
@@ -252,8 +221,8 @@
   </div>
   <h1>TalkIA</h1>
   <p class="subtitle">Walkie-talkie digital</p>
-  <p class="version">Web v1.1</p>
 
+  <input type="text" id="name-input" maxlength="24" placeholder="Tu nombre" autocomplete="off" autocorrect="off" spellcheck="false">
   <input type="text" id="room-input" maxlength="12" placeholder="CÓDIGO DE SALA" autocomplete="off" autocorrect="off" spellcheck="false">
 
   <div id="password-wrap">
@@ -275,7 +244,7 @@
       </div>
     </div>
     <div class="topbar-right">
-      <button id="btn-mute" title="Silenciar audio entrante">🔊</button>
+      <button id="btn-mute" title="Silenciar">🔊</button>
       <div class="user-count">
         <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
         <span id="user-count">1</span>
@@ -288,6 +257,8 @@
     <span id="status-text">CONECTANDO...</span>
   </div>
 
+  <div id="users-row"></div>
+
   <div class="main-area">
     <div class="ptt-wrap">
       <div class="ptt-rings">
@@ -299,7 +270,7 @@
         <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
       </div>
     </div>
-    <p class="ptt-hint" id="ptt-hint">PRESIONA PARA HABLAR</p>
+    <p class="ptt-hint" id="ptt-hint"></p>
   </div>
 
   <div class="volume-row">
@@ -312,11 +283,10 @@
   <div class="footer" id="footer">Solo tú en la sala</div>
 </div>
 
-<!-- Exit confirm dialog -->
 <div class="overlay" id="overlay">
   <div class="dialog">
     <h3>¿Salir de la sala?</h3>
-    <p id="dialog-msg">¿Confirmas que quieres salir?</p>
+    <p id="dialog-msg"></p>
     <div class="dialog-buttons">
       <button class="btn-cancel" id="btn-cancel">CANCELAR</button>
       <button class="btn-confirm" id="btn-confirm-exit">SALIR</button>
@@ -331,49 +301,51 @@ const WS_BASE = 'wss://talkia.laravas.com/ws';
 const DEFAULT_ROOM = '76961';
 const SAMPLE_RATE = 16000;
 
-// ── State ──────────────────────────────────────────────────────────────────────
 let ws = null;
 let roomCode = '';
 let roomPassword = '';
+let myName = '';
 let state = 'disconnected';
 let userCount = 1;
+let users = [];
+let currentSpeaker = null;
 let muted = false;
 let transmitting = false;
 let reconnectAllowed = true;
 let volume = 1.0;
 
-// Audio
 let audioCtx = null;
 let gainNode = null;
 let mediaStream = null;
 let scriptProcessor = null;
 let playTime = 0;
 
-// ── UI refs ───────────────────────────────────────────────────────────────────
-const joinEl       = document.getElementById('join');
-const radioEl      = document.getElementById('radio');
-const roomInput    = document.getElementById('room-input');
-const passwordInput= document.getElementById('password-input');
-const passwordWrap = document.getElementById('password-wrap');
-const btnJoin      = document.getElementById('btn-join');
-const btnBack      = document.getElementById('btn-back');
-const btnMute      = document.getElementById('btn-mute');
-const ptt          = document.getElementById('ptt');
-const statusDot    = document.getElementById('status-dot');
-const statusTxt    = document.getElementById('status-text');
-const displayRoom  = document.getElementById('display-room');
-const userCountEl  = document.getElementById('user-count');
-const footerEl     = document.getElementById('footer');
-const pttHint      = document.getElementById('ptt-hint');
-const overlay      = document.getElementById('overlay');
-const ring1        = document.getElementById('ring1');
-const ring2        = document.getElementById('ring2');
-const ring3        = document.getElementById('ring3');
-const volumeSlider = document.getElementById('volume-slider');
-const volumePct    = document.getElementById('volume-pct');
-const toastEl      = document.getElementById('toast');
+const joinEl        = document.getElementById('join');
+const radioEl       = document.getElementById('radio');
+const nameInput     = document.getElementById('name-input');
+const roomInput     = document.getElementById('room-input');
+const passwordInput = document.getElementById('password-input');
+const passwordWrap  = document.getElementById('password-wrap');
+const btnJoin       = document.getElementById('btn-join');
+const btnBack       = document.getElementById('btn-back');
+const btnMute       = document.getElementById('btn-mute');
+const ptt           = document.getElementById('ptt');
+const statusDot     = document.getElementById('status-dot');
+const statusTxt     = document.getElementById('status-text');
+const displayRoom   = document.getElementById('display-room');
+const userCountEl   = document.getElementById('user-count');
+const footerEl      = document.getElementById('footer');
+const pttHint       = document.getElementById('ptt-hint');
+const usersRow      = document.getElementById('users-row');
+const overlay       = document.getElementById('overlay');
+const ring1         = document.getElementById('ring1');
+const ring2         = document.getElementById('ring2');
+const ring3         = document.getElementById('ring3');
+const volumeSlider  = document.getElementById('volume-slider');
+const volumePct     = document.getElementById('volume-pct');
+const toastEl       = document.getElementById('toast');
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
+// Toast
 let toastTimer = null;
 function showToast(msg) {
   toastEl.textContent = msg;
@@ -382,26 +354,46 @@ function showToast(msg) {
   toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 4000);
 }
 
-// ── Password field visibility ─────────────────────────────────────────────────
+// Password field visibility
 function updatePasswordVisibility() {
   const code = roomInput.value.trim().toUpperCase();
-  const needs = code !== DEFAULT_ROOM && code.length > 0;
-  passwordWrap.classList.toggle('visible', needs);
-  if (!needs) passwordInput.value = '';
+  passwordWrap.classList.toggle('visible', code !== DEFAULT_ROOM && code.length > 0);
+  if (code === DEFAULT_ROOM) passwordInput.value = '';
 }
 roomInput.addEventListener('input', () => {
   roomInput.value = roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
   updatePasswordVisibility();
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Users chips
+function renderUsers() {
+  usersRow.innerHTML = '';
+  users.forEach(name => {
+    const chip = document.createElement('div');
+    chip.className = 'user-chip' +
+      (name === myName ? ' me' : '') +
+      (name === currentSpeaker ? ' speaking' : '');
+    chip.innerHTML = name === currentSpeaker
+      ? `<span class="mic-icon">🎙</span>${name === myName ? name + ' (tú)' : name}`
+      : (name === myName ? name + ' (tú)' : name);
+    usersRow.appendChild(chip);
+  });
+}
+
+// State
 function setState(s) {
   state = s;
   const colors = { disconnected:'#555', connecting:'#888', connected:'#00BCD4', transmitting:'#FF5252', receiving:'#4CAF50' };
   const labels = { disconnected:'DESCONECTADO', connecting:'CONECTANDO...', connected:'LISTO', transmitting:'TRANSMITIENDO', receiving:'ESCUCHANDO...' };
   statusDot.style.background = colors[s] || '#555';
-  statusTxt.textContent = labels[s] || s.toUpperCase();
   statusTxt.style.color = colors[s] || '#555';
+
+  if (s === 'receiving' && currentSpeaker) {
+    statusTxt.textContent = `HABLANDO: ${currentSpeaker.toUpperCase()}`;
+  } else {
+    statusTxt.textContent = labels[s] || s.toUpperCase();
+  }
+
   ptt.className = s === 'transmitting' ? 'transmitting' : s === 'receiving' ? 'receiving' : s === 'connected' ? 'connected' : '';
   const active = s === 'transmitting' || s === 'receiving';
   const ringColor = s === 'transmitting' ? '#FF5252' : '#4CAF50';
@@ -409,8 +401,10 @@ function setState(s) {
     r.classList.toggle('active', active);
     r.style.color = active ? ringColor : 'transparent';
   });
+
   if (s === 'connected')         pttHint.textContent = 'PRESIONA PARA HABLAR';
   else if (s === 'transmitting') pttHint.textContent = 'SUELTA PARA TERMINAR';
+  else if (s === 'receiving' && currentSpeaker) pttHint.textContent = `${currentSpeaker.toUpperCase()} ESTÁ HABLANDO`;
   else if (s === 'receiving')    pttHint.textContent = 'ESCUCHANDO...';
   else                           pttHint.textContent = '';
 }
@@ -422,13 +416,12 @@ function updateUsers(count) {
   footerEl.textContent = count === 1 ? 'Solo tú en la sala' : `${count} usuarios conectados`;
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────────────────
-function connect(room, password) {
+// WebSocket
+function connect(room, password, name) {
   setState('connecting');
-  const url = password
-    ? `${WS_BASE}/${room}?password=${encodeURIComponent(password)}`
-    : `${WS_BASE}/${room}`;
-  ws = new WebSocket(url);
+  const params = [`name=${encodeURIComponent(name)}`];
+  if (password) params.push(`password=${encodeURIComponent(password)}`);
+  ws = new WebSocket(`${WS_BASE}/${room}?${params.join('&')}`);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => setState('connected');
@@ -438,16 +431,34 @@ function connect(room, password) {
       if (!muted && state !== 'transmitting') {
         setState('receiving');
         playPcm(new Int16Array(ev.data));
-        setTimeout(() => { if (state === 'receiving') setState('connected'); }, 300);
+        setTimeout(() => { if (state === 'receiving') { currentSpeaker = null; setState('connected'); renderUsers(); } }, 300);
       }
       return;
     }
     try {
       const msg = JSON.parse(ev.data);
-      if (['welcome','user_joined','user_left'].includes(msg.type)) updateUsers(msg.count);
-      if (msg.type === 'ptt_start' && state !== 'transmitting') setState('receiving');
-      if (msg.type === 'ptt_end' && state === 'receiving') setState('connected');
-      if (msg.type === 'error') {
+      if (msg.type === 'welcome') {
+        updateUsers(msg.count);
+        users = msg.users || [];
+        renderUsers();
+      } else if (msg.type === 'user_joined') {
+        updateUsers(msg.count);
+        if (msg.name && !users.includes(msg.name)) users.push(msg.name);
+        renderUsers();
+      } else if (msg.type === 'user_left') {
+        updateUsers(msg.count);
+        users = users.filter(u => u !== msg.name);
+        if (currentSpeaker === msg.name) currentSpeaker = null;
+        renderUsers();
+      } else if (msg.type === 'ptt_start') {
+        currentSpeaker = msg.name || null;
+        if (state !== 'transmitting') setState('receiving');
+        renderUsers();
+      } else if (msg.type === 'ptt_end') {
+        currentSpeaker = null;
+        if (state === 'receiving') setState('connected');
+        renderUsers();
+      } else if (msg.type === 'error') {
         reconnectAllowed = false;
         ws.close();
         leaveRoom();
@@ -458,15 +469,18 @@ function connect(room, password) {
 
   ws.onclose = () => {
     setState('disconnected');
+    users = [];
+    currentSpeaker = null;
+    renderUsers();
     if (reconnectAllowed && radioEl.style.display !== 'none') {
-      setTimeout(() => connect(room, password), 3000);
+      setTimeout(() => connect(room, password, name), 3000);
     }
   };
 
   ws.onerror = () => ws.close();
 }
 
-// ── Audio playback (Web Audio API) ───────────────────────────────────────────
+// Audio
 function getAudioCtx() {
   if (!audioCtx || audioCtx.state === 'closed') {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
@@ -493,7 +507,6 @@ function playPcm(int16Samples) {
   playTime = startAt + buf.duration;
 }
 
-// ── Recording ─────────────────────────────────────────────────────────────────
 async function startRecording() {
   const ctx = getAudioCtx();
   mediaStream = await navigator.mediaDevices.getUserMedia({ audio: {
@@ -513,13 +526,11 @@ async function startRecording() {
 }
 
 function stopRecording() {
-  scriptProcessor?.disconnect();
-  scriptProcessor = null;
-  mediaStream?.getTracks().forEach(t => t.stop());
-  mediaStream = null;
+  scriptProcessor?.disconnect(); scriptProcessor = null;
+  mediaStream?.getTracks().forEach(t => t.stop()); mediaStream = null;
 }
 
-// ── PTT ───────────────────────────────────────────────────────────────────────
+// PTT
 async function onPttDown() {
   if (state !== 'connected') return;
   transmitting = true;
@@ -527,7 +538,6 @@ async function onPttDown() {
   ws?.send(JSON.stringify({ type: 'ptt_start' }));
   await startRecording();
 }
-
 function onPttUp() {
   if (!transmitting) return;
   transmitting = false;
@@ -535,79 +545,77 @@ function onPttUp() {
   ws?.send(JSON.stringify({ type: 'ptt_end' }));
   setState('connected');
 }
-
 ptt.addEventListener('pointerdown',  (e) => { e.preventDefault(); onPttDown(); });
 ptt.addEventListener('pointerup',    (e) => { e.preventDefault(); onPttUp(); });
 ptt.addEventListener('pointercancel',(e) => { e.preventDefault(); onPttUp(); });
 ptt.addEventListener('pointerleave', (e) => { if (transmitting) { e.preventDefault(); onPttUp(); } });
 
-// ── Volume ────────────────────────────────────────────────────────────────────
+// Volume
 volumeSlider.addEventListener('input', () => {
   volume = volumeSlider.value / 100;
   volumePct.textContent = `${volumeSlider.value}%`;
   if (gainNode) gainNode.gain.value = volume;
 });
 
-// ── Join / Leave ──────────────────────────────────────────────────────────────
-function enterRoom(room, password) {
-  roomCode = room.toUpperCase().trim();
-  roomPassword = password || '';
+// Join / Leave
+function enterRoom(room, password, name) {
+  roomCode = room; roomPassword = password; myName = name;
   reconnectAllowed = true;
   displayRoom.textContent = roomCode;
   joinEl.style.display = 'none';
   radioEl.style.display = 'flex';
   playTime = 0;
-  connect(roomCode, roomPassword);
+  connect(roomCode, roomPassword, myName);
   localStorage.setItem('last_room', roomCode);
+  localStorage.setItem('user_name', name);
 }
 
 function leaveRoom() {
   reconnectAllowed = false;
   transmitting = false;
   stopRecording();
-  ws?.close();
-  ws = null;
+  ws?.close(); ws = null;
+  users = []; currentSpeaker = null;
   setState('disconnected');
   radioEl.style.display = 'none';
   joinEl.style.display = 'flex';
 }
 
-// ── Exit confirm ──────────────────────────────────────────────────────────────
+// Exit confirm
 function showExitConfirm() {
   document.getElementById('dialog-msg').textContent =
     `Hay ${userCount} ${userCount === 1 ? 'usuario' : 'usuarios'} en la sala. ¿Confirmas que quieres salir?`;
   overlay.classList.add('visible');
 }
 document.getElementById('btn-cancel').addEventListener('click', () => overlay.classList.remove('visible'));
-document.getElementById('btn-confirm-exit').addEventListener('click', () => {
-  overlay.classList.remove('visible');
-  leaveRoom();
-});
-btnBack.addEventListener('click', () => {
-  if (userCount > 1 || state === 'connected') showExitConfirm();
-  else leaveRoom();
-});
+document.getElementById('btn-confirm-exit').addEventListener('click', () => { overlay.classList.remove('visible'); leaveRoom(); });
+btnBack.addEventListener('click', () => { if (userCount > 1 || state === 'connected') showExitConfirm(); else leaveRoom(); });
 
-// ── Mute ──────────────────────────────────────────────────────────────────────
+// Mute
 btnMute.addEventListener('click', () => {
   muted = !muted;
   btnMute.textContent = muted ? '🔇' : '🔊';
   btnMute.classList.toggle('muted', muted);
 });
 
-// ── Join button ───────────────────────────────────────────────────────────────
+// Join
 btnJoin.addEventListener('click', () => {
+  const name = nameInput.value.trim();
+  if (!name) { showToast('Ingresa tu nombre para continuar'); return; }
   const code = roomInput.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!code) return;
   const password = passwordWrap.classList.contains('visible') ? passwordInput.value.trim() : '';
-  enterRoom(code, password);
+  enterRoom(code, password, name);
 });
-roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { passwordWrap.classList.contains('visible') ? passwordInput.focus() : btnJoin.click(); } });
+nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') roomInput.focus(); });
+roomInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { passwordWrap.classList.contains('visible') ? passwordInput.focus() : btnJoin.click(); }
+});
 passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') btnJoin.click(); });
 
-// Cargar última sala o default
-const lastRoom = localStorage.getItem('last_room') || DEFAULT_ROOM;
-roomInput.value = lastRoom;
+// Restore prefs
+nameInput.value = localStorage.getItem('user_name') || '';
+roomInput.value = localStorage.getItem('last_room') || DEFAULT_ROOM;
 updatePasswordVisibility();
 
 document.addEventListener('touchmove', e => { if (e.target === ptt) e.preventDefault(); }, { passive: false });

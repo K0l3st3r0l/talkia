@@ -19,6 +19,7 @@ class RadioService {
 
   String _roomCode = '';
   String _password = '';
+  String _userName = '';
   int _userCount = 0;
   bool _disposed = false;
   bool muted = false;
@@ -28,10 +29,17 @@ class RadioService {
   final _stateCtrl = StreamController<RadioState>.broadcast();
   final _userCountCtrl = StreamController<int>.broadcast();
   final _errorCtrl = StreamController<String>.broadcast();
+  final _usersCtrl = StreamController<List<String>>.broadcast();
+  final _speakerCtrl = StreamController<String?>.broadcast();
+
+  // Mutable list tracked locally
+  final List<String> _users = [];
 
   Stream<RadioState> get stateStream => _stateCtrl.stream;
   Stream<int> get userCountStream => _userCountCtrl.stream;
   Stream<String> get errorStream => _errorCtrl.stream;
+  Stream<List<String>> get usersStream => _usersCtrl.stream;
+  Stream<String?> get speakerStream => _speakerCtrl.stream;
   RadioState get state => _state;
   int get userCount => _userCount;
 
@@ -41,9 +49,10 @@ class RadioService {
 
   Future<bool> hasMicPermission() => _audio.hasMicPermission();
 
-  Future<void> connect(String roomCode, {String password = ''}) async {
+  Future<void> connect(String roomCode, {String password = '', String userName = ''}) async {
     _roomCode = roomCode.toUpperCase().trim();
     _password = password;
+    _userName = userName.isNotEmpty ? userName : 'Usuario';
     _disposed = false;
     await _connect();
   }
@@ -51,9 +60,13 @@ class RadioService {
   Future<void> _connect() async {
     _setState(RadioState.connecting);
     try {
-      final uri = _password.isNotEmpty
-          ? Uri.parse('$kServerWsUrl/$_roomCode?password=${Uri.encodeComponent(_password)}')
-          : Uri.parse('$kServerWsUrl/$_roomCode');
+      final params = <String, String>{
+        'name': Uri.encodeComponent(_userName),
+      };
+      if (_password.isNotEmpty) params['password'] = Uri.encodeComponent(_password);
+      final query = params.entries.map((e) => '${e.key}=${e.value}').join('&');
+      final uri = Uri.parse('$kServerWsUrl/$_roomCode?$query');
+
       log.info('WS connecting → $uri');
       _channel = WebSocketChannel.connect(uri);
       await _channel!.ready;
@@ -81,38 +94,58 @@ class RadioService {
   void _onMessage(dynamic data) {
     if (data is List<int> || data is Uint8List) {
       final bytes = data is Uint8List ? data : Uint8List.fromList(data as List<int>);
-      log.info('audio chunk recibido: ${bytes.length} bytes');
       if (_state != RadioState.transmitting) {
         _setState(RadioState.receiving);
         if (!muted) _audio.playChunk(bytes);
         Future.delayed(const Duration(milliseconds: 150), () {
-          if (_state == RadioState.receiving) {
-            _setState(RadioState.connected);
-          }
+          if (_state == RadioState.receiving) _setState(RadioState.connected);
         });
       }
     } else if (data is String) {
       try {
         final msg = jsonDecode(data) as Map<String, dynamic>;
         final type = msg['type'] as String? ?? '';
-        log.info('WS msg: $type');
         switch (type) {
           case 'welcome':
+            _userCount = (msg['count'] as int?) ?? 1;
+            _userCountCtrl.add(_userCount);
+            final rawUsers = msg['users'] as List<dynamic>? ?? [];
+            _users
+              ..clear()
+              ..addAll(rawUsers.cast<String>());
+            _usersCtrl.add(List.unmodifiable(_users));
+            log.info('welcome: ${_users.join(", ")}');
+
           case 'user_joined':
+            _userCount = (msg['count'] as int?) ?? _userCount;
+            _userCountCtrl.add(_userCount);
+            final joined = msg['name'] as String? ?? 'Usuario';
+            if (!_users.contains(joined)) _users.add(joined);
+            _usersCtrl.add(List.unmodifiable(_users));
+            log.info('user_joined: $joined');
+
           case 'user_left':
             _userCount = (msg['count'] as int?) ?? _userCount;
             _userCountCtrl.add(_userCount);
-            log.info('usuarios en sala: $_userCount');
+            final left = msg['name'] as String? ?? '';
+            _users.remove(left);
+            _usersCtrl.add(List.unmodifiable(_users));
+            _speakerCtrl.add(null);
+            log.info('user_left: $left');
+
           case 'ptt_start':
-            if (_state != RadioState.transmitting) {
-              _setState(RadioState.receiving);
-            }
+            if (_state != RadioState.transmitting) _setState(RadioState.receiving);
+            final speaker = msg['name'] as String? ?? '';
+            _speakerCtrl.add(speaker);
+            log.info('ptt_start: $speaker');
+
           case 'ptt_end':
-            if (_state == RadioState.receiving) {
-              _setState(RadioState.connected);
-            }
+            if (_state == RadioState.receiving) _setState(RadioState.connected);
+            _speakerCtrl.add(null);
+
           case 'pong':
             break;
+
           case 'error':
             final code = msg['code'] as String? ?? 'unknown';
             log.warn('WS error del servidor: $code');
@@ -130,6 +163,9 @@ class RadioService {
     log.warn('WS desconectado');
     _pingTimer?.cancel();
     _wsSub?.cancel();
+    _users.clear();
+    _usersCtrl.add([]);
+    _speakerCtrl.add(null);
     if (!_disposed) {
       _setState(RadioState.disconnected);
       _scheduleReconnect();
@@ -139,9 +175,7 @@ class RadioService {
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(const Duration(seconds: 3), () {
-      if (!_disposed && _roomCode.isNotEmpty) {
-        _connect();
-      }
+      if (!_disposed && _roomCode.isNotEmpty) _connect();
     });
   }
 
@@ -161,10 +195,7 @@ class RadioService {
     _setState(RadioState.transmitting);
     _sendText({'type': 'ptt_start'});
     try {
-      await _audio.startRecording((chunk) {
-        _channel?.sink.add(chunk);
-      });
-      log.info('grabación iniciada');
+      await _audio.startRecording((chunk) => _channel?.sink.add(chunk));
     } catch (e) {
       log.error('startRecording falló', e);
       _setState(RadioState.connected);
@@ -205,12 +236,8 @@ class RadioService {
     _disposed = true;
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
-    try {
-      await _audio.stopRecording();
-    } catch (_) {}
-    try {
-      await _wsSub?.cancel();
-    } catch (_) {}
+    try { await _audio.stopRecording(); } catch (_) {}
+    try { await _wsSub?.cancel(); } catch (_) {}
     try {
       await _channel?.sink.close(ws_status.normalClosure)
           .timeout(const Duration(seconds: 2));
@@ -224,6 +251,8 @@ class RadioService {
     await _stateCtrl.close();
     await _userCountCtrl.close();
     await _errorCtrl.close();
+    await _usersCtrl.close();
+    await _speakerCtrl.close();
     await _audio.dispose();
   }
 }

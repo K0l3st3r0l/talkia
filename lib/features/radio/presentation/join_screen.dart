@@ -15,6 +15,7 @@ class JoinScreen extends StatefulWidget {
 }
 
 class _JoinScreenState extends State<JoinScreen> {
+  final _nameCtrl = TextEditingController();
   final _roomCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _obscurePassword = true;
@@ -32,7 +33,7 @@ class _JoinScreenState extends State<JoinScreen> {
   void initState() {
     super.initState();
     _roomCtrl.addListener(() => setState(() {}));
-    _loadLastRoom();
+    _loadPrefs();
     _loadVersion();
   }
 
@@ -80,33 +81,39 @@ class _JoinScreenState extends State<JoinScreen> {
     ));
   }
 
-  Future<void> _loadLastRoom() async {
+  Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    final last = prefs.getString('last_room') ?? _defaultRoom;
-    _roomCtrl.text = last;
+    _nameCtrl.text = prefs.getString('user_name') ?? '';
+    _roomCtrl.text = prefs.getString('last_room') ?? _defaultRoom;
   }
 
   Future<void> _join() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      _showSnack('Ingresa tu nombre para continuar', isError: true);
+      return;
+    }
+
     final code = _roomCtrl.text.trim().toUpperCase();
     if (code.isEmpty) return;
 
-    final password = _passwordCtrl.text.trim();
-
-    // No se valida aquí — el servidor rechaza si la sala es nueva y la contraseña es incorrecta
+    final password = _needsPassword ? _passwordCtrl.text.trim() : '';
 
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_name', name);
     await prefs.setString('last_room', code);
 
     if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => RadioScreen(roomCode: code, password: password),
+        builder: (_) => RadioScreen(roomCode: code, password: password, userName: name),
       ),
     );
   }
 
   @override
   void dispose() {
+    _nameCtrl.dispose();
     _roomCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -124,7 +131,6 @@ class _JoinScreenState extends State<JoinScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const SizedBox(height: 40),
-                // Logo — triple-tap abre consola
                 GestureDetector(
                   onTap: _onLogoTap,
                   child: Container(
@@ -158,7 +164,34 @@ class _JoinScreenState extends State<JoinScreen> {
                   _version,
                   style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                 ),
-                const SizedBox(height: 48),
+                const SizedBox(height: 40),
+
+                // Campo nombre
+                TextField(
+                  controller: _nameCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  maxLength: 24,
+                  style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+                  decoration: InputDecoration(
+                    hintText: 'Tu nombre',
+                    hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                    counterText: '',
+                    prefixIcon: const Icon(Icons.person_outline, color: AppTheme.textSecondary, size: 20),
+                    filled: true,
+                    fillColor: AppTheme.surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppTheme.idleColor),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppTheme.accent, width: 2),
+                    ),
+                  ),
+                  onSubmitted: (_) => FocusScope.of(context).nextFocus(),
+                ),
+
+                const SizedBox(height: 12),
 
                 // Campo código de sala
                 TextField(
@@ -193,16 +226,18 @@ class _JoinScreenState extends State<JoinScreen> {
                       borderSide: const BorderSide(color: AppTheme.accent, width: 2),
                     ),
                   ),
-                  onSubmitted: (_) => _needsPassword ? FocusScope.of(context).nextFocus() : _join(),
+                  onSubmitted: (_) => _needsPassword
+                      ? FocusScope.of(context).nextFocus()
+                      : _join(),
                 ),
 
-                // Campo contraseña — solo para salas distintas de 76961
+                // Campo contraseña de admin — solo para salas distintas de 76961
                 AnimatedCrossFade(
                   duration: const Duration(milliseconds: 250),
                   crossFadeState: _needsPassword
                       ? CrossFadeState.showSecond
                       : CrossFadeState.showFirst,
-                  firstChild: const SizedBox(height: 16),
+                  firstChild: const SizedBox(height: 12),
                   secondChild: Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: TextField(
@@ -211,7 +246,7 @@ class _JoinScreenState extends State<JoinScreen> {
                       style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
                       decoration: InputDecoration(
                         hintText: 'Contraseña de admin (solo para crear sala)',
-                        hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                        hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
                         filled: true,
                         fillColor: AppTheme.surface,
                         border: OutlineInputBorder(
@@ -238,7 +273,6 @@ class _JoinScreenState extends State<JoinScreen> {
 
                 const SizedBox(height: 20),
 
-                // Botón conectar
                 SizedBox(
                   width: double.infinity,
                   height: 52,
@@ -253,11 +287,7 @@ class _JoinScreenState extends State<JoinScreen> {
                     ),
                     child: const Text(
                       'CONECTAR',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 3,
-                      ),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 3),
                     ),
                   ),
                 ),
@@ -272,8 +302,7 @@ class _JoinScreenState extends State<JoinScreen> {
                   onPressed: _checkingOta ? null : _checkOta,
                   icon: _checkingOta
                       ? const SizedBox(
-                          width: 14,
-                          height: 14,
+                          width: 14, height: 14,
                           child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textSecondary),
                         )
                       : const Icon(Icons.system_update_alt, size: 16, color: AppTheme.textSecondary),
