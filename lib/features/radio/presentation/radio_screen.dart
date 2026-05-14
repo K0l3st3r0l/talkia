@@ -81,11 +81,9 @@ class _RadioScreenState extends State<RadioScreen>
     });
     _errorSub = _radio.errorStream.listen((code) {
       if (!mounted) return;
-      final msg = code == 'wrong_password'
-          ? 'Contraseña incorrecta'
-          : 'No se puede unir a la sala (contraseña requerida)';
+      const msg = 'Sala nueva — se requiere contraseña de administrador para crearla';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: AppTheme.transmitColor),
+        const SnackBar(content: Text(msg), backgroundColor: AppTheme.transmitColor),
       );
       Navigator.of(context).pop();
     });

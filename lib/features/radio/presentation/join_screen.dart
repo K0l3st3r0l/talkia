@@ -92,11 +92,7 @@ class _JoinScreenState extends State<JoinScreen> {
 
     final password = _passwordCtrl.text.trim();
 
-    // Validar que tenga contraseña si es sala nueva
-    if (_needsPassword && password.isEmpty) {
-      _showSnack('Ingresa una contraseña para esta sala', isError: true);
-      return;
-    }
+    // No se valida aquí — el servidor rechaza si la sala es nueva y la contraseña es incorrecta
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('last_room', code);
@@ -214,7 +210,7 @@ class _JoinScreenState extends State<JoinScreen> {
                       obscureText: _obscurePassword,
                       style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
                       decoration: InputDecoration(
-                        hintText: 'Contraseña de sala',
+                        hintText: 'Contraseña de admin (solo para crear sala)',
                         hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
                         filled: true,
                         fillColor: AppTheme.surface,

@@ -1,6 +1,6 @@
 {
-  "version": "1.0.11",
-  "build": 11,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=11",
-  "changelog": "Salas con contraseña; slider de volumen en sala"
+  "version": "1.0.12",
+  "build": 12,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=12",
+  "changelog": "Admin password para crear salas nuevas; unirse a sala existente sin contraseña"
 }

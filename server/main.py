@@ -5,12 +5,11 @@ Retransmite audio PCM entre todos los clientes de una misma sala.
 
 import json
 import logging
+import os
 from collections import defaultdict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import os
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("talkia")
@@ -24,7 +23,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Salas siempre abiertas — no requieren contraseña
+# Contraseña de admin para crear nuevas salas (no aplica a salas ya existentes)
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "talkia2026")
+
+# Salas que siempre se pueden crear sin contraseña de admin
 OPEN_ROOMS = {"76961"}
 
 # room_code -> set of WebSocket clients
@@ -35,9 +37,6 @@ room_speaker: dict[str, WebSocket | None] = defaultdict(lambda: None)
 
 # room_code -> client display name
 client_names: dict[WebSocket, str] = {}
-
-# room_code -> contraseña (solo salas protegidas)
-room_passwords: dict[str, str] = {}
 
 
 async def broadcast_json(room: str, data: dict, exclude: WebSocket | None = None):
@@ -84,24 +83,15 @@ async def websocket_endpoint(ws: WebSocket, room_code: str, password: str = Quer
     room_code = room_code.upper().strip()
     await ws.accept()
 
-    # Validar contraseña para salas no abiertas
-    if room_code not in OPEN_ROOMS:
-        if room_code in room_passwords:
-            # Sala existente con contraseña — verificar
-            if password != room_passwords[room_code]:
-                log.warn(f"[{room_code}] Acceso rechazado — contraseña incorrecta")
-                await ws.send_text(json.dumps({"type": "error", "code": "wrong_password"}))
-                await ws.close()
-                return
-        else:
-            # Sala nueva — exigir contraseña
-            if not password:
-                log.warn(f"[{room_code}] Acceso rechazado — contraseña requerida")
-                await ws.send_text(json.dumps({"type": "error", "code": "password_required"}))
-                await ws.close()
-                return
-            room_passwords[room_code] = password
-            log.info(f"[{room_code}] Sala creada con contraseña")
+    # Sala nueva: exigir contraseña de admin para crearla
+    is_new_room = room_code not in rooms or len(rooms[room_code]) == 0
+    if is_new_room and room_code not in OPEN_ROOMS:
+        if password != ADMIN_PASSWORD:
+            log.warning(f"[{room_code}] Creación rechazada — contraseña de admin incorrecta")
+            await ws.send_text(json.dumps({"type": "error", "code": "admin_password_required"}))
+            await ws.close()
+            return
+        log.info(f"[{room_code}] Sala creada por admin")
 
     rooms[room_code].add(ws)
     client_names[ws] = "Usuario"
@@ -167,4 +157,3 @@ async def websocket_endpoint(ws: WebSocket, room_code: str, password: str = Quer
         if not rooms[room_code]:
             del rooms[room_code]
             room_speaker.pop(room_code, None)
-            room_passwords.pop(room_code, None)
