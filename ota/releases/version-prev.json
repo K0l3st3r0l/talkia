@@ -1,7 +1,7 @@
 {
-  "version": "1.0.20",
-  "build": 20,
-  "min_build": 20,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=20",
-  "changelog": "reducir ping a 10s para evitar desconexiones por inactividad"
+  "version": "1.0.21",
+  "build": 21,
+  "min_build": 21,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=21",
+  "changelog": "forzar actualización: bloquear versiones anteriores, diálogo con descarga directa"
 }

@@ -543,47 +543,51 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (_isActive)
-                      AnimatedBuilder(
-                        animation: _waveCtrl,
-                        builder: (_, __) => CustomPaint(
-                          size: const Size(220, 220),
-                          painter: _WavePainter(_waveCtrl.value, _buttonColor),
-                        ),
-                      ),
-
-                    Listener(
-                      onPointerDown: (_) => _onPttStart(),
-                      onPointerUp: (_) => _onPttEnd(),
-                      onPointerCancel: (_) => _onPttEnd(),
-                      child: AnimatedBuilder(
-                        animation: _pulseAnim,
-                        builder: (_, child) => Transform.scale(
-                          scale: _state == RadioState.transmitting ? _pulseAnim.value : 1.0,
-                          child: child,
-                        ),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          width: 160, height: 160,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _buttonColor.withOpacity(0.15),
-                            border: Border.all(color: _buttonColor, width: _isActive ? 4 : 2),
-                            boxShadow: _isActive
-                                ? [BoxShadow(color: _buttonColor.withOpacity(0.4), blurRadius: 30, spreadRadius: 8)]
-                                : [],
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        if (_isActive)
+                          AnimatedBuilder(
+                            animation: _waveCtrl,
+                            builder: (_, __) => CustomPaint(
+                              size: const Size(280, 280),
+                              painter: _WavePainter(_waveCtrl.value, _buttonColor),
+                            ),
                           ),
-                          child: Icon(
-                            _state == RadioState.transmitting
-                                ? Icons.mic
-                                : _state == RadioState.receiving
-                                    ? Icons.volume_up
-                                    : Icons.mic_none,
-                            color: _buttonColor,
-                            size: 72,
+                        Listener(
+                          onPointerDown: (_) => _onPttStart(),
+                          onPointerUp: (_) => _onPttEnd(),
+                          onPointerCancel: (_) => _onPttEnd(),
+                          child: AnimatedBuilder(
+                            animation: _pulseAnim,
+                            builder: (_, child) => Transform.scale(
+                              scale: _state == RadioState.transmitting ? _pulseAnim.value : 1.0,
+                              child: child,
+                            ),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              width: 160, height: 160,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _buttonColor.withOpacity(0.15),
+                                border: Border.all(color: _buttonColor, width: _isActive ? 4 : 2),
+                                boxShadow: _isActive
+                                    ? [BoxShadow(color: _buttonColor.withOpacity(0.4), blurRadius: 30, spreadRadius: 8)]
+                                    : [],
+                              ),
+                              child: Icon(
+                                _state == RadioState.transmitting
+                                    ? Icons.mic
+                                    : _state == RadioState.receiving
+                                        ? Icons.volume_up
+                                        : Icons.mic_none,
+                                color: _buttonColor,
+                                size: 72,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
 
                     const SizedBox(height: 40),
