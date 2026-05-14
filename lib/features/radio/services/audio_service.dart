@@ -67,6 +67,14 @@ class AudioService {
     } catch (_) {}
   }
 
+  Future<void> setVolume(double level) async {
+    try {
+      await _channel.invokeMethod('setVolume', {'level': level.clamp(0.0, 1.0)});
+    } catch (e) {
+      log.warn('setVolume falló: $e');
+    }
+  }
+
   Future<void> _setSpeakerMode(bool speaker) async {
     try {
       await _channel.invokeMethod('setSpeakerMode', {'enabled': speaker});

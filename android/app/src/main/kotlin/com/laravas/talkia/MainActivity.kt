@@ -13,6 +13,7 @@ class MainActivity : FlutterActivity() {
 
     private var audioTrack: AudioTrack? = null
     private val sampleRate = 16000
+    private var currentVolume: Float = 1.0f
 
     private fun buildAudioTrack(): AudioTrack {
         val bufferSize = maxOf(
@@ -38,12 +39,8 @@ class MainActivity : FlutterActivity() {
             .build()
     }
 
-    // Garantiza que el AudioTrack existe y está reproduciendo, y el volumen al máximo
+    // Garantiza que el AudioTrack existe y está reproduciendo
     private fun ensurePlaying() {
-        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        am.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
-
         val track = audioTrack
         if (track != null && track.state == AudioTrack.STATE_INITIALIZED) {
             if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
@@ -51,9 +48,11 @@ class MainActivity : FlutterActivity() {
             }
             return
         }
-        // Crear nuevo track
         track?.release()
-        audioTrack = buildAudioTrack().also { it.play() }
+        audioTrack = buildAudioTrack().also {
+            it.setVolume(currentVolume)
+            it.play()
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -85,6 +84,12 @@ class MainActivity : FlutterActivity() {
                 "stopPlayback" -> {
                     audioTrack?.pause()
                     audioTrack?.flush()
+                    result.success(null)
+                }
+                "setVolume" -> {
+                    val level = (call.argument<Double>("level") ?: 1.0).toFloat()
+                    currentVolume = level.coerceIn(0f, 1f)
+                    audioTrack?.setVolume(currentVolume)
                     result.success(null)
                 }
                 else -> result.notImplemented()

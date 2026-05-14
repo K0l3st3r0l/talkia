@@ -18,6 +18,7 @@ class RadioService {
   Timer? _pingTimer;
 
   String _roomCode = '';
+  String _password = '';
   int _userCount = 0;
   bool _disposed = false;
   bool muted = false;
@@ -26,9 +27,11 @@ class RadioService {
 
   final _stateCtrl = StreamController<RadioState>.broadcast();
   final _userCountCtrl = StreamController<int>.broadcast();
+  final _errorCtrl = StreamController<String>.broadcast();
 
   Stream<RadioState> get stateStream => _stateCtrl.stream;
   Stream<int> get userCountStream => _userCountCtrl.stream;
+  Stream<String> get errorStream => _errorCtrl.stream;
   RadioState get state => _state;
   int get userCount => _userCount;
 
@@ -38,8 +41,9 @@ class RadioService {
 
   Future<bool> hasMicPermission() => _audio.hasMicPermission();
 
-  Future<void> connect(String roomCode) async {
+  Future<void> connect(String roomCode, {String password = ''}) async {
     _roomCode = roomCode.toUpperCase().trim();
+    _password = password;
     _disposed = false;
     await _connect();
   }
@@ -47,7 +51,9 @@ class RadioService {
   Future<void> _connect() async {
     _setState(RadioState.connecting);
     try {
-      final uri = Uri.parse('$kServerWsUrl/${_roomCode}');
+      final uri = _password.isNotEmpty
+          ? Uri.parse('$kServerWsUrl/$_roomCode?password=${Uri.encodeComponent(_password)}')
+          : Uri.parse('$kServerWsUrl/$_roomCode');
       log.info('WS connecting → $uri');
       _channel = WebSocketChannel.connect(uri);
       await _channel!.ready;
@@ -67,6 +73,7 @@ class RadioService {
       _startPing();
     } catch (e) {
       log.error('WS connect failed', e);
+      _setState(RadioState.disconnected);
       _scheduleReconnect();
     }
   }
@@ -106,6 +113,12 @@ class RadioService {
             }
           case 'pong':
             break;
+          case 'error':
+            final code = msg['code'] as String? ?? 'unknown';
+            log.warn('WS error del servidor: $code');
+            _disposed = true;
+            _setState(RadioState.disconnected);
+            _errorCtrl.add(code);
         }
       } catch (e) {
         log.error('WS msg parse error', e);
@@ -173,6 +186,10 @@ class RadioService {
     _setState(RadioState.connected);
   }
 
+  Future<void> setVolume(double level) async {
+    await _audio.setVolume(level);
+  }
+
   void _sendText(Map<String, dynamic> data) {
     try {
       _channel?.sink.add(jsonEncode(data));
@@ -206,6 +223,7 @@ class RadioService {
     await disconnect();
     await _stateCtrl.close();
     await _userCountCtrl.close();
+    await _errorCtrl.close();
     await _audio.dispose();
   }
 }

@@ -15,15 +15,23 @@ class JoinScreen extends StatefulWidget {
 }
 
 class _JoinScreenState extends State<JoinScreen> {
-  final _ctrl = TextEditingController();
-  bool _loading = false;
+  final _roomCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  bool _obscurePassword = true;
   bool _checkingOta = false;
   String _version = '';
   int _logoTaps = 0;
 
+  static const _defaultRoom = '76961';
+
+  bool get _needsPassword =>
+      _roomCtrl.text.trim().toUpperCase() != _defaultRoom &&
+      _roomCtrl.text.trim().isNotEmpty;
+
   @override
   void initState() {
     super.initState();
+    _roomCtrl.addListener(() => setState(() {}));
     _loadLastRoom();
     _loadVersion();
   }
@@ -74,28 +82,37 @@ class _JoinScreenState extends State<JoinScreen> {
 
   Future<void> _loadLastRoom() async {
     final prefs = await SharedPreferences.getInstance();
-    final last = prefs.getString('last_room') ?? '';
-    if (last.isNotEmpty) {
-      _ctrl.text = last;
-    }
+    final last = prefs.getString('last_room') ?? _defaultRoom;
+    _roomCtrl.text = last;
   }
 
   Future<void> _join() async {
-    final code = _ctrl.text.trim().toUpperCase();
+    final code = _roomCtrl.text.trim().toUpperCase();
     if (code.isEmpty) return;
+
+    final password = _passwordCtrl.text.trim();
+
+    // Validar que tenga contraseña si es sala nueva
+    if (_needsPassword && password.isEmpty) {
+      _showSnack('Ingresa una contraseña para esta sala', isError: true);
+      return;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('last_room', code);
 
     if (!mounted) return;
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => RadioScreen(roomCode: code)),
+      MaterialPageRoute(
+        builder: (_) => RadioScreen(roomCode: code, password: password),
+      ),
     );
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _roomCtrl.dispose();
+    _passwordCtrl.dispose();
     super.dispose();
   }
 
@@ -105,12 +122,13 @@ class _JoinScreenState extends State<JoinScreen> {
       backgroundColor: AppTheme.background,
       body: SafeArea(
         child: Center(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo / icono — triple-tap abre consola de logs
+                const SizedBox(height: 40),
+                // Logo — triple-tap abre consola
                 GestureDetector(
                   onTap: _onLogoTap,
                   child: Container(
@@ -144,9 +162,11 @@ class _JoinScreenState extends State<JoinScreen> {
                   _version,
                   style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                 ),
-                const SizedBox(height: 56),
+                const SizedBox(height: 48),
+
+                // Campo código de sala
                 TextField(
-                  controller: _ctrl,
+                  controller: _roomCtrl,
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
@@ -177,14 +197,57 @@ class _JoinScreenState extends State<JoinScreen> {
                       borderSide: const BorderSide(color: AppTheme.accent, width: 2),
                     ),
                   ),
-                  onSubmitted: (_) => _join(),
+                  onSubmitted: (_) => _needsPassword ? FocusScope.of(context).nextFocus() : _join(),
                 ),
-                const SizedBox(height: 24),
+
+                // Campo contraseña — solo para salas distintas de 76961
+                AnimatedCrossFade(
+                  duration: const Duration(milliseconds: 250),
+                  crossFadeState: _needsPassword
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                  firstChild: const SizedBox(height: 16),
+                  secondChild: Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: TextField(
+                      controller: _passwordCtrl,
+                      obscureText: _obscurePassword,
+                      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+                      decoration: InputDecoration(
+                        hintText: 'Contraseña de sala',
+                        hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                        filled: true,
+                        fillColor: AppTheme.surface,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppTheme.idleColor),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppTheme.accent, width: 2),
+                        ),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                            color: AppTheme.textSecondary,
+                            size: 20,
+                          ),
+                          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                        ),
+                      ),
+                      onSubmitted: (_) => _join(),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Botón conectar
                 SizedBox(
                   width: double.infinity,
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: _loading ? null : _join,
+                    onPressed: _join,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.accent,
                       foregroundColor: Colors.black,
@@ -223,6 +286,7 @@ class _JoinScreenState extends State<JoinScreen> {
                     style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, letterSpacing: 1.5),
                   ),
                 ),
+                const SizedBox(height: 40),
               ],
             ),
           ),

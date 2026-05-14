@@ -10,7 +10,8 @@ import '../services/radio_service.dart';
 
 class RadioScreen extends StatefulWidget {
   final String roomCode;
-  const RadioScreen({super.key, required this.roomCode});
+  final String password;
+  const RadioScreen({super.key, required this.roomCode, this.password = ''});
 
   @override
   State<RadioScreen> createState() => _RadioScreenState();
@@ -24,6 +25,7 @@ class _RadioScreenState extends State<RadioScreen>
   int _userCount = 0;
   int _roomCodeTaps = 0;
   bool _muted = false;
+  double _volume = 1.0;
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
@@ -31,6 +33,7 @@ class _RadioScreenState extends State<RadioScreen>
 
   StreamSubscription? _stateSub;
   StreamSubscription? _countSub;
+  StreamSubscription? _errorSub;
 
   bool _hasMicPermission = false;
 
@@ -76,9 +79,19 @@ class _RadioScreenState extends State<RadioScreen>
     _countSub = _radio.userCountStream.listen((c) {
       if (mounted) setState(() => _userCount = c);
     });
+    _errorSub = _radio.errorStream.listen((code) {
+      if (!mounted) return;
+      final msg = code == 'wrong_password'
+          ? 'Contraseña incorrecta'
+          : 'No se puede unir a la sala (contraseña requerida)';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: AppTheme.transmitColor),
+      );
+      Navigator.of(context).pop();
+    });
 
     // Conectar siempre — se puede escuchar sin micrófono
-    await _radio.connect(widget.roomCode);
+    await _radio.connect(widget.roomCode, password: widget.password);
 
     // Iniciar foreground service para mantener conexión en segundo plano
     try {
@@ -180,6 +193,7 @@ class _RadioScreenState extends State<RadioScreen>
     _waveCtrl.dispose();
     _stateSub?.cancel();
     _countSub?.cancel();
+    _errorSub?.cancel();
     _radio.dispose();
     super.dispose();
   }
@@ -419,9 +433,42 @@ class _RadioScreenState extends State<RadioScreen>
             ),
           ),
 
+          // Control de volumen
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              children: [
+                const Icon(Icons.volume_down, color: AppTheme.textSecondary, size: 18),
+                Expanded(
+                  child: Slider(
+                    value: _volume,
+                    min: 0.0,
+                    max: 1.0,
+                    onChanged: (v) {
+                      setState(() => _volume = v);
+                      _radio.setVolume(v);
+                    },
+                    activeColor: AppTheme.accent,
+                    inactiveColor: AppTheme.surface,
+                  ),
+                ),
+                const Icon(Icons.volume_up, color: AppTheme.textSecondary, size: 18),
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 36,
+                  child: Text(
+                    '${(_volume * 100).round()}%',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           // Footer
           Padding(
-            padding: const EdgeInsets.only(bottom: 24),
+            padding: const EdgeInsets.only(bottom: 16),
             child: Text(
               _userCount == 1
                   ? 'Solo tú en la sala'

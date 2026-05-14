@@ -3,11 +3,10 @@ TalkIA — WebSocket relay server
 Retransmite audio PCM entre todos los clientes de una misma sala.
 """
 
-import asyncio
 import json
 import logging
 from collections import defaultdict
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -25,6 +24,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Salas siempre abiertas — no requieren contraseña
+OPEN_ROOMS = {"76961"}
+
 # room_code -> set of WebSocket clients
 rooms: dict[str, set[WebSocket]] = defaultdict(set)
 
@@ -33,6 +35,9 @@ room_speaker: dict[str, WebSocket | None] = defaultdict(lambda: None)
 
 # room_code -> client display name
 client_names: dict[WebSocket, str] = {}
+
+# room_code -> contraseña (solo salas protegidas)
+room_passwords: dict[str, str] = {}
 
 
 async def broadcast_json(room: str, data: dict, exclude: WebSocket | None = None):
@@ -75,9 +80,29 @@ async def health():
 
 
 @app.websocket("/ws/{room_code}")
-async def websocket_endpoint(ws: WebSocket, room_code: str):
+async def websocket_endpoint(ws: WebSocket, room_code: str, password: str = Query(default="")):
     room_code = room_code.upper().strip()
     await ws.accept()
+
+    # Validar contraseña para salas no abiertas
+    if room_code not in OPEN_ROOMS:
+        if room_code in room_passwords:
+            # Sala existente con contraseña — verificar
+            if password != room_passwords[room_code]:
+                log.warn(f"[{room_code}] Acceso rechazado — contraseña incorrecta")
+                await ws.send_text(json.dumps({"type": "error", "code": "wrong_password"}))
+                await ws.close()
+                return
+        else:
+            # Sala nueva — exigir contraseña
+            if not password:
+                log.warn(f"[{room_code}] Acceso rechazado — contraseña requerida")
+                await ws.send_text(json.dumps({"type": "error", "code": "password_required"}))
+                await ws.close()
+                return
+            room_passwords[room_code] = password
+            log.info(f"[{room_code}] Sala creada con contraseña")
+
     rooms[room_code].add(ws)
     client_names[ws] = "Usuario"
     user_count = len(rooms[room_code])
@@ -94,7 +119,6 @@ async def websocket_endpoint(ws: WebSocket, room_code: str):
             message = await ws.receive()
 
             if "bytes" in message and message["bytes"]:
-                # Audio chunk — retransmitir a todos menos al emisor
                 await broadcast_bytes(room_code, message["bytes"], exclude=ws)
 
             elif "text" in message and message["text"]:
@@ -103,13 +127,11 @@ async def websocket_endpoint(ws: WebSocket, room_code: str):
                     msg_type = ctrl.get("type", "")
 
                     if msg_type == "ptt_start":
-                        # Si la sala está libre o es el mismo hablante, conceder el piso
                         if room_speaker[room_code] is None or room_speaker[room_code] == ws:
                             room_speaker[room_code] = ws
                             await broadcast_json(room_code, {"type": "ptt_start"}, exclude=ws)
                             log.info(f"[{room_code}] PTT start")
                         else:
-                            # Sala ocupada — último gana (override)
                             room_speaker[room_code] = ws
                             await broadcast_json(room_code, {"type": "ptt_start"}, exclude=ws)
 
@@ -145,3 +167,4 @@ async def websocket_endpoint(ws: WebSocket, room_code: str):
         if not rooms[room_code]:
             del rooms[room_code]
             room_speaker.pop(room_code, None)
+            room_passwords.pop(room_code, None)

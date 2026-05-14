@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10",
-  "build": 10,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=10",
-  "changelog": "Fix: conecta siempre; salir no se cuelga"
+  "version": "1.0.11",
+  "build": 11,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=11",
+  "changelog": "Salas con contraseña; slider de volumen en sala"
 }

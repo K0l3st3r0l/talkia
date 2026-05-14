@@ -2,7 +2,7 @@ name: talkia
 description: "TalkIA — Walkie-talkie app con Flutter"
 publish_to: 'none'
 
-version: 1.0.10+10
+version: 1.0.11+11
 
 environment:
   sdk: ^3.8.0

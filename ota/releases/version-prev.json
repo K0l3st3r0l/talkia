@@ -1,6 +1,6 @@
 {
-  "version": "1.0.9",
-  "build": 9,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=9",
-  "changelog": "Background mode, confirmación al salir, mute, web app para iPhone"
+  "version": "1.0.10",
+  "build": 10,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=10",
+  "changelog": "Fix: conecta siempre; salir no se cuelga"
 }
