@@ -64,18 +64,26 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "setSpeakerMode" -> {
-                    val enabled = call.argument<Boolean>("enabled") ?: true
                     val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    // STREAM_MUSIC usa el altavoz por defecto; MODE_NORMAL evita conflictos de volumen
                     am.mode = AudioManager.MODE_NORMAL
                     am.isSpeakerphoneOn = false
+                    // Forzar volumen de medios al máximo al iniciar
+                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
+                    currentVolume = 1.0f
                     result.success(null)
                 }
                 "playPcmChunk" -> {
                     val pcm = call.argument<ByteArray>("pcm")
                     if (pcm != null) {
                         ensurePlaying()
-                        audioTrack?.write(pcm, 0, pcm.size)
+                        val track = audioTrack
+                        if (track != null) {
+                            val written = track.write(pcm, 0, pcm.size)
+                            if (written < 0) {
+                                android.util.Log.e("TalkIA", "AudioTrack.write error: $written state=${track.state} playState=${track.playState}")
+                            }
+                        }
                         result.success(null)
                     } else {
                         result.error("NO_DATA", "pcm is null", null)
@@ -89,7 +97,11 @@ class MainActivity : FlutterActivity() {
                 "setVolume" -> {
                     val level = (call.argument<Double>("level") ?: 1.0).toFloat()
                     currentVolume = level.coerceIn(0f, 1f)
-                    audioTrack?.setVolume(currentVolume)
+                    // Controlar volumen de medios del sistema para que el slider esté sincronizado
+                    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, (currentVolume * maxVol).toInt(), 0)
+                    audioTrack?.setVolume(1.0f)
                     result.success(null)
                 }
                 else -> result.notImplemented()

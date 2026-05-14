@@ -1,6 +1,6 @@
 {
-  "version": "1.0.14",
-  "build": 14,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=14",
-  "changelog": "Nombres de usuario: identificación en sala y al hablar"
+  "version": "1.0.15",
+  "build": 15,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=15",
+  "changelog": "OTA check en sala + logs diagnóstico audio"
 }
