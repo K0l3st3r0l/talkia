@@ -62,6 +62,12 @@ echo "   APK:      https://ota.laravas.com/talkia/$APK_NAME"
 echo "   Tamaño:   $(du -sh "$OTA_RELEASES/$APK_NAME" | cut -f1)"
 echo "   Changelog: $CHANGELOG"
 
+# ── Rebuild servidor web (Docker) ────────────────────────────────────────────
+echo ""
+echo "▶ Rebuildeando servidor web..."
+docker compose -f server/docker-compose.yml up -d --build 2>&1 | grep -E "Built|Started|Error" || true
+echo "✅ Servidor web actualizado"
+
 # ── Git commit y push ─────────────────────────────────────────────────────────
 echo ""
 echo "▶ Commiteando cambios..."
