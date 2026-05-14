@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/log_service.dart';
@@ -38,6 +39,7 @@ class _JoinScreenState extends State<JoinScreen> {
     _loadPrefs();
     _loadVersion();
     _autoCheckForced();
+    _checkBatteryOptimization();
   }
 
   Future<void> _loadVersion() async {
@@ -50,6 +52,55 @@ class _JoinScreenState extends State<JoinScreen> {
     if (_logoTaps >= 3) {
       _logoTaps = 0;
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LogScreen()));
+    }
+  }
+
+  Future<void> _checkBatteryOptimization() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('battery_opt_asked') == true) return;
+      final isIgnoring = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+      if (isIgnoring) return;
+      if (!mounted) return;
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.surface,
+          title: const Row(
+            children: [
+              Icon(Icons.battery_saver, color: AppTheme.accent),
+              SizedBox(width: 10),
+              Text('Mantener activo', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+            ],
+          ),
+          content: const Text(
+            'Android puede cerrar TalkIA en segundo plano y desconectarte de la sala.\n\n'
+            'Para evitarlo, desactiva la optimización de batería para esta app.',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Ahora no', style: TextStyle(color: AppTheme.textSecondary)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.accent,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Configurar', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+      await prefs.setBool('battery_opt_asked', true);
+      if (confirm == true) {
+        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      }
+    } catch (e) {
+      log.warn('battery opt check falló: $e');
     }
   }
 

@@ -1,7 +1,7 @@
 {
-  "version": "1.0.22",
-  "build": 22,
-  "min_build": 22,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=22",
-  "changelog": "fix animación ondas: Stack sobre botón en lugar de encima en Column"
+  "version": "1.0.23",
+  "build": 23,
+  "min_build": 23,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=23",
+  "changelog": "fix contador usuarios: sincronizar con lista real, limpiar conexiones muertas"
 }

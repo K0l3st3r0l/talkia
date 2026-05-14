@@ -1,7 +1,7 @@
 {
-  "version": "1.0.23",
-  "build": 23,
-  "min_build": 23,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=23",
-  "changelog": "fix contador usuarios: sincronizar con lista real, limpiar conexiones muertas"
+  "version": "1.0.24",
+  "build": 24,
+  "min_build": 24,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=24",
+  "changelog": "solicitar exclusión de optimización de batería para evitar desconexiones en segundo plano"
 }
