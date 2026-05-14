@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/log_service.dart';
 import '../../debug/log_screen.dart';
+import '../../ota_update/ota_service.dart';
 import '../services/radio_service.dart';
 
 class RadioScreen extends StatefulWidget {
@@ -44,6 +45,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
   StreamSubscription? _errorSub;
   StreamSubscription? _usersSub;
   StreamSubscription? _speakerSub;
+
+  Timer? _otaTimer;
+  bool _hasUpdate = false;
+  OtaCheckResult? _pendingUpdate;
 
   bool _hasMicPermission = false;
 
@@ -110,6 +115,9 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
       userName: widget.userName,
     );
 
+    _checkOta();
+    _otaTimer = Timer.periodic(const Duration(minutes: 5), (_) => _checkOta());
+
     try {
       await FlutterForegroundTask.startService(
         serviceId: 1001,
@@ -119,6 +127,24 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     } catch (e) {
       log.warn('foreground service no pudo iniciar: $e');
     }
+  }
+
+  Future<void> _checkOta() async {
+    final result = await OtaService().checkForUpdate();
+    if (result == null || !result.hasUpdate || !mounted) return;
+    if (_hasUpdate && result.serverBuild == _pendingUpdate?.serverBuild) return;
+    setState(() {
+      _hasUpdate = true;
+      _pendingUpdate = result;
+    });
+    log.info('OTA update disponible en sala: build ${result.serverBuild}');
+  }
+
+  Future<void> _installUpdate() async {
+    final update = _pendingUpdate;
+    if (update == null) return;
+    setState(() => _hasUpdate = false);
+    await OtaService().downloadAndInstall(update.apkUrl);
   }
 
   Future<bool> _confirmExit() async {
@@ -205,6 +231,7 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     FlutterForegroundTask.stopService();
     _pulseCtrl.dispose();
     _waveCtrl.dispose();
+    _otaTimer?.cancel();
     _stateSub?.cancel();
     _countSub?.cancel();
     _errorSub?.cancel();
@@ -327,6 +354,28 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                 ),
               ),
             ),
+
+            // Banner de actualización disponible
+            if (_hasUpdate)
+              GestureDetector(
+                onTap: _installUpdate,
+                child: Container(
+                  width: double.infinity,
+                  color: AppTheme.accent.withOpacity(0.12),
+                  padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.system_update_alt, color: AppTheme.accent, size: 14),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Nueva versión disponible (build ${_pendingUpdate?.serverBuild}) — toca para actualizar',
+                        style: const TextStyle(color: AppTheme.accent, fontSize: 11, letterSpacing: 1),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
 
             // Lista de usuarios conectados
             if (_users.isNotEmpty)

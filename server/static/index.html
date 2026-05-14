@@ -200,6 +200,29 @@
 
   .footer { padding-bottom: 16px; font-size: 12px; color: #444; }
 
+  /* OTA banner */
+  #ota-banner {
+    display: none;
+    width: 100%;
+    background: rgba(0,188,212,0.12);
+    border-bottom: 1px solid rgba(0,188,212,0.3);
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 11px;
+    color: #00BCD4;
+    letter-spacing: 1px;
+    cursor: pointer;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+  }
+  #ota-banner.visible { display: flex; }
+
+  /* App download link in join */
+  .app-download { font-size: 11px; color: #444; text-align: center; margin-top: 4px; }
+  .app-download a { color: #00BCD4; text-decoration: none; }
+  .app-download a:hover { text-decoration: underline; }
+
   .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 100; }
   .overlay.visible { display: flex; }
   .dialog { background: #1A1A2E; border-radius: 16px; padding: 24px; max-width: 300px; width: 90%; }
@@ -231,6 +254,9 @@
 
   <button class="btn-primary" id="btn-join">CONECTAR</button>
   <p class="hint">Todos los dispositivos en el mismo código<br>pueden escucharse entre sí</p>
+  <p class="app-download" id="app-download-link">
+    📲 <a href="https://ota.laravas.com/talkia-latest.apk" id="apk-link">Descargar app Android</a>
+  </p>
 </div>
 
 <!-- Radio screen -->
@@ -250,6 +276,11 @@
         <span id="user-count">1</span>
       </div>
     </div>
+  </div>
+
+  <div id="ota-banner">
+    <span>📲</span>
+    <span id="ota-banner-text">Nueva versión disponible</span>
   </div>
 
   <div class="status-bar">
@@ -298,6 +329,8 @@
 
 <script>
 const WS_BASE = 'wss://talkia.laravas.com/ws';
+const OTA_VERSION_URL = 'https://ota.laravas.com/talkia/version.json';
+const OTA_APK_URL = 'https://ota.laravas.com/talkia-latest.apk';
 const DEFAULT_ROOM = '76961';
 const SAMPLE_RATE = 16000;
 
@@ -313,6 +346,36 @@ let muted = false;
 let transmitting = false;
 let reconnectAllowed = true;
 let volume = 1.0;
+
+let otaBuild = 0;
+let otaCheckInterval = null;
+
+const otaBanner = document.getElementById('ota-banner');
+const otaBannerText = document.getElementById('ota-banner-text');
+const apkLink = document.getElementById('apk-link');
+
+async function checkOta() {
+  try {
+    const res = await fetch(OTA_VERSION_URL + '?t=' + Date.now());
+    const data = await res.json();
+    const build = data.build || 0;
+    const url = data.url || OTA_APK_URL;
+    apkLink.href = url;
+    if (build !== otaBuild) {
+      otaBuild = build;
+      if (apkLink) apkLink.textContent = `Descargar app Android (build ${build})`;
+    }
+    // Show OTA banner in radio screen if update is available
+    if (radioEl.style.display !== 'none' && build > 0) {
+      otaBannerText.textContent = `Nueva versión Android disponible (build ${build}) — toca para descargar`;
+      otaBanner.classList.add('visible');
+    }
+  } catch(_) {}
+}
+
+otaBanner.addEventListener('click', () => {
+  window.open(apkLink.href || OTA_APK_URL, '_blank');
+});
 
 let audioCtx = null;
 let gainNode = null;
@@ -568,6 +631,10 @@ function enterRoom(room, password, name) {
   connect(roomCode, roomPassword, myName);
   localStorage.setItem('last_room', roomCode);
   localStorage.setItem('user_name', name);
+  otaBanner.classList.remove('visible');
+  checkOta();
+  clearInterval(otaCheckInterval);
+  otaCheckInterval = setInterval(checkOta, 5 * 60 * 1000);
 }
 
 function leaveRoom() {
@@ -577,6 +644,8 @@ function leaveRoom() {
   ws?.close(); ws = null;
   users = []; currentSpeaker = null;
   setState('disconnected');
+  clearInterval(otaCheckInterval);
+  otaBanner.classList.remove('visible');
   radioEl.style.display = 'none';
   joinEl.style.display = 'flex';
 }
@@ -617,6 +686,9 @@ passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') btnJoi
 nameInput.value = localStorage.getItem('user_name') || '';
 roomInput.value = localStorage.getItem('last_room') || DEFAULT_ROOM;
 updatePasswordVisibility();
+
+// OTA check al cargar (actualiza link de descarga en join screen)
+checkOta();
 
 document.addEventListener('touchmove', e => { if (e.target === ptt) e.preventDefault(); }, { passive: false });
 </script>

@@ -94,6 +94,7 @@ class RadioService {
   void _onMessage(dynamic data) {
     if (data is List<int> || data is Uint8List) {
       final bytes = data is Uint8List ? data : Uint8List.fromList(data as List<int>);
+      log.info('audio bytes: ${bytes.length} state=$_state muted=$muted');
       if (_state != RadioState.transmitting) {
         _setState(RadioState.receiving);
         if (!muted) _audio.playChunk(bytes);

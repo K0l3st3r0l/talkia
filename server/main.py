@@ -130,7 +130,9 @@ async def websocket_endpoint(
             message = await ws.receive()
 
             if "bytes" in message and message["bytes"]:
-                await broadcast_bytes(room_code, message["bytes"], exclude=ws)
+                chunk = message["bytes"]
+                log.info(f"[{room_code}] audio {len(chunk)}b de '{display_name}' → {len(rooms[room_code])-1} clientes")
+                await broadcast_bytes(room_code, chunk, exclude=ws)
 
             elif "text" in message and message["text"]:
                 try:

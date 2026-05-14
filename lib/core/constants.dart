@@ -3,7 +3,7 @@ const String kServerWsUrl = 'wss://$kServerHost/ws';
 const String kOtaBaseUrl = 'https://ota.laravas.com/talkia';
 const String kOtaVersionUrl = '$kOtaBaseUrl/version.json';
 const String kOtaApkUrl = 'https://ota.laravas.com/talkia-latest.apk';
-const int kAppBuild = 14;
+const int kAppBuild = 15;
 
 // Audio PCM config
 const int kSampleRate = 16000;

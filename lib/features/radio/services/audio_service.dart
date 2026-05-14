@@ -55,6 +55,7 @@ class AudioService {
   // Reproduce un chunk PCM via AudioTrack nativo — sin overhead de just_audio
   Future<void> playChunk(Uint8List pcmData) async {
     try {
+      log.info('playChunk ${pcmData.length}b');
       await _channel.invokeMethod('playPcmChunk', {'pcm': pcmData});
     } catch (e) {
       log.error('playChunk falló', e);
