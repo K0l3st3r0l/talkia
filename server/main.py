@@ -55,6 +55,27 @@ pcm_encoders: dict[WebSocket, opuslib.Encoder] = {}
 pcm_buffers: dict[WebSocket, bytearray] = {}
 
 
+async def _cleanup_dead(room: str, dead: set[WebSocket]):
+    for ws in dead:
+        rooms[room].discard(ws)
+        name = client_names.pop(ws, None)
+        client_codec.pop(ws, None)
+        opus_decoders.pop(ws, None)
+        pcm_encoders.pop(ws, None)
+        pcm_buffers.pop(ws, None)
+        if room_speaker[room] == ws:
+            room_speaker[room] = None
+        if name:
+            remaining = len(rooms[room])
+            log.info(f"[{room}] '{name}' removido (conexión muerta). Restantes: {remaining}")
+            msg = json.dumps({"type": "user_left", "count": remaining, "name": name})
+            for active_ws in list(rooms[room]):
+                try:
+                    await active_ws.send_text(msg)
+                except Exception:
+                    pass
+
+
 async def broadcast_json(room: str, data: dict, exclude: WebSocket | None = None):
     msg = json.dumps(data)
     dead = set()
@@ -65,8 +86,8 @@ async def broadcast_json(room: str, data: dict, exclude: WebSocket | None = None
             await ws.send_text(msg)
         except Exception:
             dead.add(ws)
-    for ws in dead:
-        rooms[room].discard(ws)
+    if dead:
+        await _cleanup_dead(room, dead)
 
 
 async def broadcast_bytes(
@@ -119,8 +140,8 @@ async def broadcast_bytes(
         except Exception:
             dead.add(ws)
 
-    for ws in dead:
-        rooms[room].discard(ws)
+    if dead:
+        await _cleanup_dead(room, dead)
 
 
 def room_user_names(room: str) -> list[str]:
@@ -241,6 +262,7 @@ async def websocket_endpoint(
     except Exception as e:
         log.error(f"[{room_code}] Error: {e}")
     finally:
+        already_removed = ws not in rooms[room_code]
         rooms[room_code].discard(ws)
         client_names.pop(ws, None)
         client_codec.pop(ws, None)
@@ -253,7 +275,7 @@ async def websocket_endpoint(
         remaining = len(rooms[room_code])
         log.info(f"[{room_code}] '{display_name}' desconectado. Restantes: {remaining}")
 
-        if remaining > 0:
+        if not already_removed and remaining > 0:
             await broadcast_json(room_code, {
                 "type": "user_left",
                 "count": remaining,

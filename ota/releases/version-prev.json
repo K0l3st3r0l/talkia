@@ -1,7 +1,7 @@
 {
-  "version": "1.0.21",
-  "build": 21,
-  "min_build": 21,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=21",
-  "changelog": "forzar actualización: bloquear versiones anteriores, diálogo con descarga directa"
+  "version": "1.0.22",
+  "build": 22,
+  "min_build": 22,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=22",
+  "changelog": "fix animación ondas: Stack sobre botón en lugar de encima en Column"
 }

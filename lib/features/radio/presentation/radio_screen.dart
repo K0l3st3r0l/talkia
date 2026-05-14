@@ -257,7 +257,7 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
         title: const Text('¿Salir de la sala?',
             style: TextStyle(color: AppTheme.textPrimary)),
         content: Text(
-          'Hay $_userCount ${_userCount == 1 ? 'usuario' : 'usuarios'} en la sala. ¿Confirmas que quieres salir?',
+          'Hay ${_users.length} ${_users.length == 1 ? 'usuario' : 'usuarios'} en la sala. ¿Confirmas que quieres salir?',
           style: const TextStyle(color: AppTheme.textSecondary),
         ),
         actions: [
@@ -411,9 +411,9 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                     color: _userCount > 1 ? AppTheme.receiveColor : AppTheme.textSecondary),
                   const SizedBox(width: 4),
                   Text(
-                    '$_userCount',
+                    '${_users.length}',
                     style: TextStyle(
-                      color: _userCount > 1 ? AppTheme.receiveColor : AppTheme.textSecondary,
+                      color: _users.length > 1 ? AppTheme.receiveColor : AppTheme.textSecondary,
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
                     ),
@@ -665,7 +665,7 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
               child: Text(
-                _userCount == 1 ? 'Solo tú en la sala' : '$_userCount usuarios conectados',
+                _users.length == 1 ? 'Solo tú en la sala' : '${_users.length} usuarios conectados',
                 style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
             ),
