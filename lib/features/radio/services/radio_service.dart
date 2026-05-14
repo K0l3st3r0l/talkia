@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
 import '../../../core/constants.dart';
@@ -14,8 +15,10 @@ class RadioService {
 
   WebSocketChannel? _channel;
   StreamSubscription? _wsSub;
+  StreamSubscription? _connectivitySub;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
+  bool _pendingPong = false;
 
   String _roomCode = '';
   String _password = '';
@@ -54,7 +57,26 @@ class RadioService {
     _password = password;
     _userName = userName.isNotEmpty ? userName : 'Usuario';
     _disposed = false;
+    _startConnectivityListener();
     await _connect();
+  }
+
+  void _startConnectivityListener() {
+    _connectivitySub?.cancel();
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      final hasNetwork = results.any((r) =>
+          r == ConnectivityResult.wifi ||
+          r == ConnectivityResult.mobile ||
+          r == ConnectivityResult.ethernet);
+      if (!hasNetwork || _disposed || _roomCode.isEmpty) return;
+      log.info('Red cambiada — reconectando WebSocket');
+      _reconnectTimer?.cancel();
+      _pingTimer?.cancel();
+      _wsSub?.cancel();
+      try { _channel?.sink.close(); } catch (_) {}
+      _channel = null;
+      _connect();
+    });
   }
 
   Future<void> _connect() async {
@@ -145,6 +167,7 @@ class RadioService {
             _speakerCtrl.add(null);
 
           case 'pong':
+            _pendingPong = false;
             break;
 
           case 'error':
@@ -182,7 +205,15 @@ class RadioService {
 
   void _startPing() {
     _pingTimer?.cancel();
+    _pendingPong = false;
     _pingTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (_pendingPong) {
+        // El ping anterior no recibió pong — conexión muerta
+        log.warn('Pong timeout — reconectando');
+        _onDisconnected();
+        return;
+      }
+      _pendingPong = true;
       _sendText({'type': 'ping'});
     });
   }
@@ -237,6 +268,8 @@ class RadioService {
     _disposed = true;
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
+    _connectivitySub?.cancel();
+    _connectivitySub = null;
     try { await _audio.stopRecording(); } catch (_) {}
     try { await _wsSub?.cancel(); } catch (_) {}
     try {
