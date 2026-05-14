@@ -38,6 +38,9 @@ room_speaker: dict[str, WebSocket | None] = defaultdict(lambda: None)
 # ws -> display name
 client_names: dict[WebSocket, str] = {}
 
+# ws -> codec ('opus' | 'pcm')
+client_codec: dict[WebSocket, str] = {}
+
 
 async def broadcast_json(room: str, data: dict, exclude: WebSocket | None = None):
     msg = json.dumps(data)
@@ -53,11 +56,13 @@ async def broadcast_json(room: str, data: dict, exclude: WebSocket | None = None
         rooms[room].discard(ws)
 
 
-async def broadcast_bytes(room: str, data: bytes, exclude: WebSocket | None = None):
+async def broadcast_bytes(room: str, data: bytes, sender_codec: str, exclude: WebSocket | None = None):
     dead = set()
     for ws in list(rooms[room]):
         if ws == exclude:
             continue
+        if client_codec.get(ws, "pcm") != sender_codec:
+            continue  # no enviar Opus a clientes PCM ni viceversa
         try:
             await ws.send_bytes(data)
         except Exception:
@@ -88,6 +93,7 @@ async def websocket_endpoint(
     room_code: str,
     password: str = Query(default=""),
     name: str = Query(default="Usuario"),
+    codec: str = Query(default="pcm"),
 ):
     room_code = room_code.upper().strip()
     display_name = name.strip()[:32] or "Usuario"
@@ -106,6 +112,7 @@ async def websocket_endpoint(
 
     rooms[room_code].add(ws)
     client_names[ws] = display_name
+    client_codec[ws] = codec if codec in ("opus", "pcm") else "pcm"
     user_count = len(rooms[room_code])
 
     log.info(f"[{room_code}] '{display_name}' conectado. Total: {user_count}")
@@ -131,8 +138,9 @@ async def websocket_endpoint(
 
             if "bytes" in message and message["bytes"]:
                 chunk = message["bytes"]
-                log.info(f"[{room_code}] audio {len(chunk)}b de '{display_name}' → {len(rooms[room_code])-1} clientes")
-                await broadcast_bytes(room_code, chunk, exclude=ws)
+                sender_codec = client_codec.get(ws, "pcm")
+                log.info(f"[{room_code}] audio {len(chunk)}b ({sender_codec}) de '{display_name}' → {len(rooms[room_code])-1} clientes")
+                await broadcast_bytes(room_code, chunk, sender_codec=sender_codec, exclude=ws)
 
             elif "text" in message and message["text"]:
                 try:
@@ -166,6 +174,7 @@ async def websocket_endpoint(
     finally:
         rooms[room_code].discard(ws)
         client_names.pop(ws, None)
+        client_codec.pop(ws, None)
         if room_speaker[room_code] == ws:
             room_speaker[room_code] = None
 

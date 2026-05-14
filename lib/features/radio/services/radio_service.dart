@@ -18,6 +18,7 @@ class RadioService {
   StreamSubscription? _connectivitySub;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
+  Timer? _connectivityDebounce;
   bool _pendingPong = false;
 
   String _roomCode = '';
@@ -69,21 +70,28 @@ class RadioService {
           r == ConnectivityResult.mobile ||
           r == ConnectivityResult.ethernet);
       if (!hasNetwork || _disposed || _roomCode.isEmpty) return;
-      log.info('Red cambiada — reconectando WebSocket');
-      _reconnectTimer?.cancel();
-      _pingTimer?.cancel();
-      _wsSub?.cancel();
-      try { _channel?.sink.close(); } catch (_) {}
-      _channel = null;
-      _connect();
+      // Debounce: connectivity fires multiple rapid events; wait for the last one
+      _connectivityDebounce?.cancel();
+      _connectivityDebounce = Timer(const Duration(milliseconds: 600), () {
+        if (_disposed || _state == RadioState.connecting) return;
+        log.info('Red cambiada — reconectando WebSocket');
+        _reconnectTimer?.cancel();
+        _pingTimer?.cancel();
+        _wsSub?.cancel();
+        try { _channel?.sink.close(); } catch (_) {}
+        _channel = null;
+        _connect();
+      });
     });
   }
 
   Future<void> _connect() async {
+    if (_state == RadioState.connecting) return;
     _setState(RadioState.connecting);
     try {
       final params = <String, String>{
         'name': Uri.encodeComponent(_userName),
+        'codec': 'opus',
       };
       if (_password.isNotEmpty) params['password'] = Uri.encodeComponent(_password);
       final query = params.entries.map((e) => '${e.key}=${e.value}').join('&');
@@ -268,6 +276,7 @@ class RadioService {
     _disposed = true;
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
+    _connectivityDebounce?.cancel();
     _connectivitySub?.cancel();
     _connectivitySub = null;
     try { await _audio.stopRecording(); } catch (_) {}
