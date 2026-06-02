@@ -1,7 +1,7 @@
 {
-  "version": "1.0.26",
-  "build": 26,
-  "min_build": 26,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=26",
-  "changelog": "subir prioridad notificación foreground service a HIGH para Vivo/Funtouch OS"
+  "version": "1.0.27",
+  "build": 27,
+  "min_build": 27,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=27",
+  "changelog": "Fix reconexión de sala; muestra último en hablar"
 }

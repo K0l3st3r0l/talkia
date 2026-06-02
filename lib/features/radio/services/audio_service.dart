@@ -16,6 +16,7 @@ class AudioService {
 
   final AudioRecorder _recorder = AudioRecorder();
   StreamController<Uint8List>? _outgoingAudio;
+  StreamSubscription? _recordSub;
 
   SimpleOpusEncoder? _encoder;
   SimpleOpusDecoder? _decoder;
@@ -58,7 +59,7 @@ class AudioService {
     );
     log.info('startStream OK');
 
-    stream.listen((chunk) {
+    _recordSub = stream.listen((chunk) {
       if (chunk.isEmpty) return;
       _encodeBuffer.addAll(chunk);
 
@@ -81,6 +82,8 @@ class AudioService {
 
   Future<void> stopRecording() async {
     log.info('stopRecording');
+    await _recordSub?.cancel();
+    _recordSub = null;
     await _recorder.stop();
     await _outgoingAudio?.close();
     _outgoingAudio = null;
@@ -125,6 +128,8 @@ class AudioService {
   }
 
   Future<void> dispose() async {
+    await _recordSub?.cancel();
+    _recordSub = null;
     await _recorder.dispose();
     await _outgoingAudio?.close();
     await stopPlayback();

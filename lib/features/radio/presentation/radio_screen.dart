@@ -33,6 +33,7 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
   int _userCount = 0;
   List<String> _users = [];
   String? _speaker;
+  String? _lastSpeaker;
   int _roomCodeTaps = 0;
   bool _muted = false;
   double _volume = 1.0;
@@ -99,7 +100,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
       if (mounted) setState(() => _users = u);
     });
     _speakerSub = _radio.speakerStream.listen((s) {
-      if (mounted) setState(() => _speaker = s);
+      if (mounted) setState(() {
+        if (s != null) _lastSpeaker = s;
+        _speaker = s;
+      });
     });
     _errorSub = _radio.errorStream.listen((code) {
       if (!mounted) return;
@@ -623,6 +627,25 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                         'ESCUCHANDO...',
                         style: TextStyle(color: AppTheme.receiveColor, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold),
                       ),
+
+                    if (_lastSpeaker != null && _speaker == null) ...[
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.history, size: 12, color: AppTheme.textSecondary),
+                          const SizedBox(width: 6),
+                          Text(
+                            'ÚLTIMO: ${_lastSpeaker!.toUpperCase()}',
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 11,
+                              letterSpacing: 1.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

@@ -1,7 +1,7 @@
 {
-  "version": "1.0.25",
-  "build": 25,
-  "min_build": 25,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=25",
-  "changelog": "reducir delay de reconexión de 3s a 1s para roaming WiFi más rápido"
+  "version": "1.0.26",
+  "build": 26,
+  "min_build": 26,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=26",
+  "changelog": "subir prioridad notificación foreground service a HIGH para Vivo/Funtouch OS"
 }

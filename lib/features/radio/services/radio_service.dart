@@ -100,7 +100,7 @@ class RadioService {
 
       log.info('WS connecting → $uri');
       _channel = WebSocketChannel.connect(uri);
-      await _channel!.ready;
+      await _channel!.ready.timeout(const Duration(seconds: 10));
 
       _wsSub = _channel!.stream.listen(
         _onMessage,
