@@ -47,6 +47,7 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
   StreamSubscription? _errorSub;
   StreamSubscription? _usersSub;
   StreamSubscription? _speakerSub;
+  StreamSubscription? _channelBusySub;
 
   Timer? _otaTimer;
   bool _hasUpdate = false;
@@ -116,6 +117,17 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
         const SnackBar(content: Text(msg), backgroundColor: AppTheme.transmitColor),
       );
       Navigator.of(context).pop();
+    });
+    _channelBusySub = _radio.channelBusyStream.listen((busyName) {
+      if (!mounted) return;
+      final msg = busyName.isNotEmpty ? 'Canal ocupado — $busyName está hablando' : 'Canal ocupado';
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: AppTheme.receiveColor,
+          duration: const Duration(seconds: 2),
+        ));
     });
 
     await _radio.connect(
@@ -291,6 +303,20 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
       );
       return;
     }
+    if (_state == RadioState.receiving) {
+      final speaker = _speaker;
+      final msg = speaker != null && speaker.isNotEmpty
+          ? 'Canal ocupado — $speaker está hablando'
+          : 'Canal ocupado';
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          content: Text(msg),
+          backgroundColor: AppTheme.receiveColor,
+          duration: const Duration(seconds: 2),
+        ));
+      return;
+    }
     await _radio.startTransmitting();
   }
 
@@ -342,6 +368,7 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     _errorSub?.cancel();
     _usersSub?.cancel();
     _speakerSub?.cancel();
+    _channelBusySub?.cancel();
     _radio.dispose();
     super.dispose();
   }

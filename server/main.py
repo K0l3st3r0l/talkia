@@ -4,6 +4,7 @@ Soporta codec Opus (app Android) y PCM (web/iOS).
 Transcoding bidireccional: Opus→PCM para web, PCM→Opus para Android.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -29,6 +30,8 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "talkia2026")
 MIN_BUILD = int(os.environ.get("MIN_BUILD", "0"))
 OPEN_ROOMS = {"76961"}
 
+SPEAKER_TIMEOUT_SECONDS = 30
+
 # Parámetros Opus — deben coincidir con el cliente Android
 OPUS_SAMPLE_RATE = 16000
 OPUS_CHANNELS = 1
@@ -40,6 +43,9 @@ rooms: dict[str, set[WebSocket]] = defaultdict(set)
 
 # room_code -> WebSocket del hablante activo
 room_speaker: dict[str, WebSocket | None] = defaultdict(lambda: None)
+
+# room_code -> Task del timeout del hablante activo
+room_speaker_timeout: dict[str, asyncio.Task] = {}
 
 # ws -> nombre visible
 client_names: dict[WebSocket, str] = {}
@@ -53,6 +59,21 @@ opus_decoders: dict[WebSocket, opuslib.Decoder] = {}
 # Para clientes PCM: encoder + buffer para transcodificar PCM→Opus hacia receptores Android
 pcm_encoders: dict[WebSocket, opuslib.Encoder] = {}
 pcm_buffers: dict[WebSocket, bytearray] = {}
+
+
+def _cancel_speaker_timeout(room: str):
+    task = room_speaker_timeout.pop(room, None)
+    if task and not task.done():
+        task.cancel()
+
+
+async def _force_release_speaker(room: str, ws: WebSocket, name: str):
+    await asyncio.sleep(SPEAKER_TIMEOUT_SECONDS)
+    if room_speaker.get(room) == ws:
+        room_speaker[room] = None
+        room_speaker_timeout.pop(room, None)
+        log.warning(f"[{room}] PTT timeout — forzando ptt_end de '{name}'")
+        await broadcast_json(room, {"type": "ptt_end"})
 
 
 async def _cleanup_dead(room: str, dead: set[WebSocket]):
@@ -232,20 +253,33 @@ async def websocket_endpoint(
                     msg_type = ctrl.get("type", "")
 
                     if msg_type == "ptt_start":
-                        room_speaker[room_code] = ws
-                        # Limpiar buffer al iniciar transmisión para evitar datos residuales
-                        if ws in pcm_buffers:
-                            pcm_buffers[ws].clear()
-                        await broadcast_json(room_code, {
-                            "type": "ptt_start",
-                            "name": display_name,
-                        }, exclude=ws)
-                        log.info(f"[{room_code}] PTT start — '{display_name}'")
+                        current = room_speaker[room_code]
+                        if current is not None and current != ws:
+                            # Canal ocupado: rechazar y notificar al solicitante
+                            busy_name = client_names.get(current, "otro usuario")
+                            await ws.send_text(json.dumps({
+                                "type": "channel_busy",
+                                "name": busy_name,
+                            }))
+                            log.info(f"[{room_code}] Canal ocupado — '{display_name}' rechazado (habla '{busy_name}')")
+                        else:
+                            room_speaker[room_code] = ws
+                            if ws in pcm_buffers:
+                                pcm_buffers[ws].clear()
+                            _cancel_speaker_timeout(room_code)
+                            room_speaker_timeout[room_code] = asyncio.create_task(
+                                _force_release_speaker(room_code, ws, display_name)
+                            )
+                            await broadcast_json(room_code, {
+                                "type": "ptt_start",
+                                "name": display_name,
+                            }, exclude=ws)
+                            log.info(f"[{room_code}] PTT start — '{display_name}'")
 
                     elif msg_type == "ptt_end":
                         if room_speaker[room_code] == ws:
                             room_speaker[room_code] = None
-                        # Descartar bytes incompletos (< un frame Opus)
+                            _cancel_speaker_timeout(room_code)
                         if ws in pcm_buffers:
                             pcm_buffers[ws].clear()
                         await broadcast_json(room_code, {"type": "ptt_end"}, exclude=ws)
@@ -271,6 +305,7 @@ async def websocket_endpoint(
         pcm_buffers.pop(ws, None)
         if room_speaker[room_code] == ws:
             room_speaker[room_code] = None
+            _cancel_speaker_timeout(room_code)
 
         remaining = len(rooms[room_code])
         log.info(f"[{room_code}] '{display_name}' desconectado. Restantes: {remaining}")

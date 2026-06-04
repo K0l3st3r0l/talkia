@@ -35,6 +35,7 @@ class RadioService {
   final _errorCtrl = StreamController<String>.broadcast();
   final _usersCtrl = StreamController<List<String>>.broadcast();
   final _speakerCtrl = StreamController<String?>.broadcast();
+  final _channelBusyCtrl = StreamController<String>.broadcast();
 
   // Mutable list tracked locally
   final List<String> _users = [];
@@ -44,6 +45,7 @@ class RadioService {
   Stream<String> get errorStream => _errorCtrl.stream;
   Stream<List<String>> get usersStream => _usersCtrl.stream;
   Stream<String?> get speakerStream => _speakerCtrl.stream;
+  Stream<String> get channelBusyStream => _channelBusyCtrl.stream;
   RadioState get state => _state;
   int get userCount => _userCount;
 
@@ -175,6 +177,11 @@ class RadioService {
             if (_state == RadioState.receiving) _setState(RadioState.connected);
             _speakerCtrl.add(null);
 
+          case 'channel_busy':
+            final busyName = msg['name'] as String? ?? '';
+            _channelBusyCtrl.add(busyName);
+            log.warn('Canal ocupado — $busyName está hablando');
+
           case 'pong':
             _pendingPong = false;
             break;
@@ -298,6 +305,7 @@ class RadioService {
     await _errorCtrl.close();
     await _usersCtrl.close();
     await _speakerCtrl.close();
+    await _channelBusyCtrl.close();
     await _audio.dispose();
   }
 }
