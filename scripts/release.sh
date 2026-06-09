@@ -31,6 +31,29 @@ VERSION=$(grep "^version:" "$PUBSPEC" | grep -oP '[\d.]+(?=\+)')
 BUILD=$(grep "^version:" "$PUBSPEC" | grep -oP '\+\K[0-9]+')
 echo "▶ Versión: $VERSION+$BUILD"
 
+# ── Verificar memoria antes de compilar ───────────────────────────────────────
+# Gradle necesita ~2GB de heap. Si el servidor está bajo carga, esperar.
+esperar_memoria_disponible() {
+    local MIN_RAM_MB=3000 MAX_SWAP_MB=1500 POLL_SECS=30 TIMEOUT_SECS=600 elapsed=0
+    while true; do
+        local ram swap
+        ram=$(free -m | awk 'NR==2{print $7}')
+        swap=$(free -m | awk 'NR==3{print $3}')
+        if [[ $ram -ge $MIN_RAM_MB && $swap -le $MAX_SWAP_MB ]]; then
+            echo "▶ Memoria OK — RAM disponible: ${ram}MB, swap: ${swap}MB"
+            return 0
+        fi
+        echo "⏳ Servidor bajo carga (RAM: ${ram}MB libre, swap: ${swap}MB usado). Esperando ${POLL_SECS}s..."
+        sleep $POLL_SECS
+        elapsed=$((elapsed + POLL_SECS))
+        if [[ $elapsed -ge $TIMEOUT_SECS ]]; then
+            echo "⚠️  Timeout tras $((TIMEOUT_SECS/60)) min. Compilando de todas formas."
+            return 0
+        fi
+    done
+}
+esperar_memoria_disponible
+
 # ── Build APK release ──────────────────────────────────────────────────────────
 echo "▶ Compilando APK release (puede tardar 3-5 min)..."
 flutter --suppress-analytics build apk --release 2>&1 | grep -v "Woah\|root\|superuser"
