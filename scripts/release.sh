@@ -15,6 +15,7 @@ APK_LOCAL="build/app/outputs/flutter-apk/app-release.apk"
 APK_NAME="talkia-latest.apk"
 PUBSPEC="pubspec.yaml"
 CONSTANTS="lib/core/constants.dart"
+WIKI_DIR="/root/apps/wiki"
 
 # ── Bump build number ──────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--bump" ]]; then
@@ -100,3 +101,18 @@ git reset -- "*.apk" talkia-latest.apk 2>/dev/null || true
 git commit -m "release: v${VERSION} (build ${BUILD}) — ${CHANGELOG}"
 git push origin main
 echo "✅ Git actualizado → v${VERSION} (build ${BUILD})"
+
+# ── Actualizar wiki ───────────────────────────────────────────────────────────
+echo ""
+echo "▶ Actualizando wiki..."
+TODAY=$(date '+%Y-%m-%d')
+cat >> "$WIKI_DIR/log.md" <<EOF
+
+## [$TODAY] update | TalkIA v${VERSION} (build ${BUILD}) — ${CHANGELOG}
+- APK publicado en OTA: https://ota.laravas.com/talkia/talkia-latest.apk
+- Tamaño: $(du -sh "$OTA_RELEASES/$APK_NAME" | cut -f1)
+EOF
+bash "$WIKI_DIR/wiki-push.sh" "update: TalkIA v${VERSION} — ${CHANGELOG}" 2>/dev/null || echo "⚠ Wiki push falló (continúa igualmente)."
+
+echo ""
+echo "✅ Wiki actualizada"
