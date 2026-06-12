@@ -55,3 +55,7 @@ ota/releases/*.apk
 # Server env
 server/.env
 talkia-latest.apk
+
+
+# Graphify - regenerar con: bash /root/apps/wiki/brain-setup.sh /root/apps
+graphify-out/
