@@ -2,13 +2,20 @@
 TalkIA — WebSocket relay server
 Soporta codec Opus (app Android) y PCM (web/iOS).
 Transcoding bidireccional: Opus→PCM para web, PCM→Opus para Android.
+
+Presencia: la identidad es `client_id` (estable por instalación), no el nombre.
+Cada cambio de roster viaja como foto completa; ver
+wiki/projects/talkia/decisions/protocolo-presencia.md
 """
 
 import asyncio
 import json
 import logging
 import os
-from collections import defaultdict
+import time
+import uuid
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -17,7 +24,63 @@ import opuslib
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("talkia")
 
-app = FastAPI(title="TalkIA Server")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "talkia2026")
+MIN_BUILD = int(os.environ.get("MIN_BUILD", "0"))
+OPEN_ROOMS = {"76961"}
+
+SPEAKER_TIMEOUT_SECONDS = 30
+
+# El cliente pinguea cada 10s. 45s tolera 3 pings perdidos + margen para que
+# Doze/App Standby difieran el timer en Android.
+CLIENT_TIMEOUT_SECONDS = int(os.environ.get("CLIENT_TIMEOUT_SECONDS", "45"))
+REAPER_INTERVAL_SECONDS = int(os.environ.get("REAPER_INTERVAL_SECONDS", "10"))
+CLOSE_TIMEOUT_SECONDS = 2
+
+# Parámetros Opus — deben coincidir con el cliente Android
+OPUS_SAMPLE_RATE = 16000
+OPUS_CHANNELS = 1
+OPUS_FRAME_SAMPLES = 320        # 20ms a 16kHz
+OPUS_FRAME_BYTES = OPUS_FRAME_SAMPLES * 2  # s16le: 2 bytes por muestra
+
+
+@dataclass
+class Session:
+    ws: WebSocket
+    client_id: str
+    name: str
+    codec: str
+    build: int
+    room: str
+    last_seen: float
+    # Solo se expulsa por inactividad a quien demostró que pinguea; los clientes
+    # antiguos que nunca pinguean conservan el comportamiento previo.
+    heartbeat: bool = False
+    gone: bool = False
+    decoder: opuslib.Decoder | None = None
+    encoder: opuslib.Encoder | None = None
+    buffer: bytearray | None = None
+
+
+# room_code -> {client_id: Session}  (el orden de inserción define el orden del roster)
+rooms: dict[str, dict[str, Session]] = {}
+
+# room_code -> Session del hablante activo
+room_speaker: dict[str, Session | None] = {}
+
+# room_code -> Task del timeout del hablante activo
+room_speaker_timeout: dict[str, asyncio.Task] = {}
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    reaper = asyncio.create_task(_reaper_loop())
+    try:
+        yield
+    finally:
+        reaper.cancel()
+
+
+app = FastAPI(title="TalkIA Server", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,39 +89,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "talkia2026")
-MIN_BUILD = int(os.environ.get("MIN_BUILD", "0"))
-OPEN_ROOMS = {"76961"}
 
-SPEAKER_TIMEOUT_SECONDS = 30
+def _sessions(room: str) -> list[Session]:
+    return list(rooms.get(room, {}).values())
 
-# Parámetros Opus — deben coincidir con el cliente Android
-OPUS_SAMPLE_RATE = 16000
-OPUS_CHANNELS = 1
-OPUS_FRAME_SAMPLES = 320        # 20ms a 16kHz
-OPUS_FRAME_BYTES = OPUS_FRAME_SAMPLES * 2  # s16le: 2 bytes por muestra
 
-# room_code -> set of WebSocket clients
-rooms: dict[str, set[WebSocket]] = defaultdict(set)
-
-# room_code -> WebSocket del hablante activo
-room_speaker: dict[str, WebSocket | None] = defaultdict(lambda: None)
-
-# room_code -> Task del timeout del hablante activo
-room_speaker_timeout: dict[str, asyncio.Task] = {}
-
-# ws -> nombre visible
-client_names: dict[WebSocket, str] = {}
-
-# ws -> codec ('opus' | 'pcm')
-client_codec: dict[WebSocket, str] = {}
-
-# Para clientes Opus: decoder para transcodificar Opus→PCM hacia receptores web
-opus_decoders: dict[WebSocket, opuslib.Decoder] = {}
-
-# Para clientes PCM: encoder + buffer para transcodificar PCM→Opus hacia receptores Android
-pcm_encoders: dict[WebSocket, opuslib.Encoder] = {}
-pcm_buffers: dict[WebSocket, bytearray] = {}
+def roster_payload(room: str) -> dict:
+    sessions = _sessions(room)
+    return {
+        "count": len(sessions),
+        # `users` (strings) es el formato legacy: lo consumen index.html y los APK build<=28
+        "users": [s.name for s in sessions],
+        "roster": [
+            {"id": s.client_id, "name": s.name, "build": s.build}
+            for s in sessions
+        ],
+    }
 
 
 def _cancel_speaker_timeout(room: str):
@@ -67,106 +113,146 @@ def _cancel_speaker_timeout(room: str):
         task.cancel()
 
 
-async def _force_release_speaker(room: str, ws: WebSocket, name: str):
+async def _force_release_speaker(room: str, session: Session):
     await asyncio.sleep(SPEAKER_TIMEOUT_SECONDS)
-    if room_speaker.get(room) == ws:
+    if room_speaker.get(room) is session:
         room_speaker[room] = None
         room_speaker_timeout.pop(room, None)
-        log.warning(f"[{room}] PTT timeout — forzando ptt_end de '{name}'")
+        log.warning(f"[{room}] PTT timeout — forzando ptt_end de '{session.name}'")
         await broadcast_json(room, {"type": "ptt_end"})
 
 
-async def _cleanup_dead(room: str, dead: set[WebSocket]):
-    for ws in dead:
-        rooms[room].discard(ws)
-        name = client_names.pop(ws, None)
-        client_codec.pop(ws, None)
-        opus_decoders.pop(ws, None)
-        pcm_encoders.pop(ws, None)
-        pcm_buffers.pop(ws, None)
-        if room_speaker[room] == ws:
-            room_speaker[room] = None
-        if name:
-            remaining = len(rooms[room])
-            log.info(f"[{room}] '{name}' removido (conexión muerta). Restantes: {remaining}")
-            msg = json.dumps({"type": "user_left", "count": remaining, "name": name})
-            for active_ws in list(rooms[room]):
-                try:
-                    await active_ws.send_text(msg)
-                except Exception:
-                    pass
+async def _close_quietly(ws: WebSocket):
+    try:
+        await asyncio.wait_for(ws.close(), timeout=CLOSE_TIMEOUT_SECONDS)
+    except Exception:
+        pass
 
 
-async def broadcast_json(room: str, data: dict, exclude: WebSocket | None = None):
+def _gc_room(room: str):
+    if not rooms.get(room):
+        rooms.pop(room, None)
+        room_speaker.pop(room, None)
+        _cancel_speaker_timeout(room)
+
+
+async def _drop(session: Session, reason: str, announce: bool = True, close: bool = True):
+    """Saca una sesión de la sala. Idempotente."""
+    if session.gone:
+        return
+    session.gone = True
+
+    room = session.room
+    bucket = rooms.get(room)
+    was_attached = bucket is not None and bucket.get(session.client_id) is session
+    if was_attached:
+        del bucket[session.client_id]
+
+    session.decoder = None
+    session.encoder = None
+    session.buffer = None
+
+    freed_mic = room_speaker.get(room) is session
+    if freed_mic:
+        room_speaker[room] = None
+        _cancel_speaker_timeout(room)
+
+    if close:
+        await _close_quietly(session.ws)
+
+    if not was_attached:
+        _gc_room(room)
+        return
+
+    remaining = len(rooms.get(room, {}))
+    log.info(f"[{room}] '{session.name}' ({session.client_id}) fuera — {reason}. Restantes: {remaining}")
+
+    if freed_mic:
+        await broadcast_json(room, {"type": "ptt_end"})
+    if announce and remaining > 0:
+        await broadcast_json(room, {
+            "type": "user_left",
+            "name": session.name,
+            "id": session.client_id,
+            **roster_payload(room),
+        })
+
+    _gc_room(room)
+
+
+async def broadcast_json(room: str, data: dict, exclude: Session | None = None):
     msg = json.dumps(data)
-    dead = set()
-    for ws in list(rooms[room]):
-        if ws == exclude:
+    dead: list[Session] = []
+    for session in _sessions(room):
+        if session is exclude:
             continue
         try:
-            await ws.send_text(msg)
+            await session.ws.send_text(msg)
         except Exception:
-            dead.add(ws)
-    if dead:
-        await _cleanup_dead(room, dead)
+            dead.append(session)
+    for session in dead:
+        await _drop(session, reason="envío falló")
 
 
-async def broadcast_bytes(
-    room: str,
-    chunk: bytes,
-    sender_ws: WebSocket,
-    exclude: WebSocket | None = None,
-):
-    sender_codec = client_codec.get(sender_ws, "pcm")
-
+async def broadcast_bytes(room: str, chunk: bytes, sender: Session):
     # Preparar Opus frames si el emisor es PCM (para receptores Android)
     opus_frames: list[bytes] = []
-    if sender_codec == "pcm":
-        buf = pcm_buffers.get(sender_ws)
-        enc = pcm_encoders.get(sender_ws)
-        if buf is not None and enc is not None:
-            buf.extend(chunk)
-            while len(buf) >= OPUS_FRAME_BYTES:
-                frame = bytes(buf[:OPUS_FRAME_BYTES])
-                del buf[:OPUS_FRAME_BYTES]
-                try:
-                    opus_frames.append(enc.encode(frame, OPUS_FRAME_SAMPLES))
-                except Exception as e:
-                    log.error(f"PCM→Opus encode error: {e}")
+    if sender.codec == "pcm" and sender.buffer is not None and sender.encoder is not None:
+        buf = sender.buffer
+        buf.extend(chunk)
+        while len(buf) >= OPUS_FRAME_BYTES:
+            frame = bytes(buf[:OPUS_FRAME_BYTES])
+            del buf[:OPUS_FRAME_BYTES]
+            try:
+                opus_frames.append(sender.encoder.encode(frame, OPUS_FRAME_SAMPLES))
+            except Exception as e:
+                log.error(f"PCM→Opus encode error: {e}")
 
     # Preparar PCM si el emisor es Opus (para receptores web)
     pcm_transcoded: bytes | None = None
-    if sender_codec == "opus":
-        decoder = opus_decoders.get(sender_ws)
-        if decoder is not None:
-            try:
-                pcm_transcoded = decoder.decode(chunk, OPUS_FRAME_SAMPLES)
-            except Exception as e:
-                log.error(f"Opus→PCM decode error: {e}")
-
-    dead = set()
-    for ws in list(rooms[room]):
-        if ws == exclude:
-            continue
-        receiver_codec = client_codec.get(ws, "pcm")
+    if sender.codec == "opus" and sender.decoder is not None:
         try:
-            if receiver_codec == sender_codec:
-                await ws.send_bytes(chunk)
-            elif sender_codec == "opus" and receiver_codec == "pcm":
+            pcm_transcoded = sender.decoder.decode(chunk, OPUS_FRAME_SAMPLES)
+        except Exception as e:
+            log.error(f"Opus→PCM decode error: {e}")
+
+    dead: list[Session] = []
+    for session in _sessions(room):
+        if session is sender:
+            continue
+        try:
+            if session.codec == sender.codec:
+                await session.ws.send_bytes(chunk)
+            elif sender.codec == "opus" and session.codec == "pcm":
                 if pcm_transcoded:
-                    await ws.send_bytes(pcm_transcoded)
-            elif sender_codec == "pcm" and receiver_codec == "opus":
+                    await session.ws.send_bytes(pcm_transcoded)
+            elif sender.codec == "pcm" and session.codec == "opus":
                 for frame in opus_frames:
-                    await ws.send_bytes(frame)
+                    await session.ws.send_bytes(frame)
         except Exception:
-            dead.add(ws)
+            dead.append(session)
 
-    if dead:
-        await _cleanup_dead(room, dead)
+    for session in dead:
+        await _drop(session, reason="envío de audio falló")
 
 
-def room_user_names(room: str) -> list[str]:
-    return [client_names[ws] for ws in rooms[room] if ws in client_names]
+async def _reaper_loop():
+    while True:
+        await asyncio.sleep(REAPER_INTERVAL_SECONDS)
+        try:
+            now = time.monotonic()
+            for room in list(rooms.keys()):
+                for session in _sessions(room):
+                    if not session.heartbeat:
+                        continue
+                    idle = now - session.last_seen
+                    if idle > CLIENT_TIMEOUT_SECONDS:
+                        log.warning(
+                            f"[{room}] '{session.name}' sin señales hace {idle:.0f}s — expulsado (conexión fantasma)"
+                        )
+                        await _drop(session, reason=f"sin ping hace {idle:.0f}s")
+        except Exception as e:
+            log.error(f"Reaper error: {e}")
 
 
 @app.get("/")
@@ -176,9 +262,25 @@ async def index():
 
 @app.get("/health")
 async def health():
+    now = time.monotonic()
     return {
         "status": "ok",
-        "rooms": {r: len(c) for r, c in rooms.items() if c},
+        "client_timeout": CLIENT_TIMEOUT_SECONDS,
+        "rooms": {
+            room: [
+                {
+                    "id": s.client_id,
+                    "name": s.name,
+                    "build": s.build,
+                    "codec": s.codec,
+                    "heartbeat": s.heartbeat,
+                    "idle": round(now - s.last_seen, 1),
+                }
+                for s in sessions.values()
+            ]
+            for room, sessions in rooms.items()
+            if sessions
+        },
     }
 
 
@@ -190,10 +292,12 @@ async def websocket_endpoint(
     name: str = Query(default="Usuario"),
     codec: str = Query(default="pcm"),
     build: int = Query(default=0),
+    client_id: str = Query(default=""),
 ):
     room_code = room_code.upper().strip()
     display_name = name.strip()[:32] or "Usuario"
-    client_codec_val = codec if codec in ("opus", "pcm") else "pcm"
+    codec_val = codec if codec in ("opus", "pcm") else "pcm"
+    stable_id = client_id.strip()[:64]
 
     await ws.accept()
 
@@ -203,8 +307,7 @@ async def websocket_endpoint(
         await ws.close()
         return
 
-    is_new_room = room_code not in rooms or len(rooms[room_code]) == 0
-    if is_new_room and room_code not in OPEN_ROOMS:
+    if not rooms.get(room_code) and room_code not in OPEN_ROOMS:
         if password != ADMIN_PASSWORD:
             log.warning(f"[{room_code}] Creación rechazada — contraseña incorrecta")
             await ws.send_text(json.dumps({"type": "error", "code": "admin_password_required"}))
@@ -212,40 +315,61 @@ async def websocket_endpoint(
             return
         log.info(f"[{room_code}] Sala creada por admin")
 
-    rooms[room_code].add(ws)
-    client_names[ws] = display_name
-    client_codec[ws] = client_codec_val
+    # Sin client_id (cliente antiguo) cada conexión es una identidad distinta:
+    # se conserva el comportamiento previo en vez de fusionar usuarios por nombre.
+    cid = stable_id or f"anon-{uuid.uuid4().hex[:12]}"
 
-    if client_codec_val == "opus":
-        opus_decoders[ws] = opuslib.Decoder(OPUS_SAMPLE_RATE, OPUS_CHANNELS)
+    previous = rooms.get(room_code, {}).get(cid)
+    if previous is not None:
+        log.info(f"[{room_code}] '{display_name}' reconectó con client_id {cid} — reemplazando sesión anterior")
+        await _drop(previous, reason="sesión reemplazada", announce=False)
+
+    session = Session(
+        ws=ws,
+        client_id=cid,
+        name=display_name,
+        codec=codec_val,
+        build=build,
+        room=room_code,
+        last_seen=time.monotonic(),
+        heartbeat=bool(stable_id),
+    )
+
+    if codec_val == "opus":
+        session.decoder = opuslib.Decoder(OPUS_SAMPLE_RATE, OPUS_CHANNELS)
     else:
-        pcm_encoders[ws] = opuslib.Encoder(OPUS_SAMPLE_RATE, OPUS_CHANNELS, "voip")
-        pcm_buffers[ws] = bytearray()
+        session.encoder = opuslib.Encoder(OPUS_SAMPLE_RATE, OPUS_CHANNELS, "voip")
+        session.buffer = bytearray()
 
-    user_count = len(rooms[room_code])
-    log.info(f"[{room_code}] '{display_name}' ({client_codec_val}) conectado. Total: {user_count}")
+    rooms.setdefault(room_code, {})[cid] = session
+
+    log.info(f"[{room_code}] '{display_name}' ({codec_val}, build {build}) conectado. Total: {len(rooms[room_code])}")
 
     await broadcast_json(room_code, {
         "type": "user_joined",
-        "count": user_count,
         "name": display_name,
-    }, exclude=ws)
+        "id": cid,
+        **roster_payload(room_code),
+    }, exclude=session)
 
     await ws.send_text(json.dumps({
         "type": "welcome",
-        "count": user_count,
         "room": room_code,
-        "users": room_user_names(room_code),
+        "you": cid,
+        **roster_payload(room_code),
     }))
 
     try:
         while True:
             message = await ws.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            session.last_seen = time.monotonic()
 
             if "bytes" in message and message["bytes"]:
                 chunk = message["bytes"]
-                log.info(f"[{room_code}] audio {len(chunk)}b ({client_codec_val}) de '{display_name}'")
-                await broadcast_bytes(room_code, chunk, sender_ws=ws, exclude=ws)
+                log.info(f"[{room_code}] audio {len(chunk)}b ({codec_val}) de '{display_name}'")
+                await broadcast_bytes(room_code, chunk, sender=session)
 
             elif "text" in message and message["text"]:
                 try:
@@ -253,39 +377,39 @@ async def websocket_endpoint(
                     msg_type = ctrl.get("type", "")
 
                     if msg_type == "ptt_start":
-                        current = room_speaker[room_code]
-                        if current is not None and current != ws:
-                            # Canal ocupado: rechazar y notificar al solicitante
-                            busy_name = client_names.get(current, "otro usuario")
+                        current = room_speaker.get(room_code)
+                        if current is not None and current is not session:
                             await ws.send_text(json.dumps({
                                 "type": "channel_busy",
-                                "name": busy_name,
+                                "name": current.name,
                             }))
-                            log.info(f"[{room_code}] Canal ocupado — '{display_name}' rechazado (habla '{busy_name}')")
+                            log.info(f"[{room_code}] Canal ocupado — '{display_name}' rechazado (habla '{current.name}')")
                         else:
-                            room_speaker[room_code] = ws
-                            if ws in pcm_buffers:
-                                pcm_buffers[ws].clear()
+                            room_speaker[room_code] = session
+                            if session.buffer is not None:
+                                session.buffer.clear()
                             _cancel_speaker_timeout(room_code)
                             room_speaker_timeout[room_code] = asyncio.create_task(
-                                _force_release_speaker(room_code, ws, display_name)
+                                _force_release_speaker(room_code, session)
                             )
                             await broadcast_json(room_code, {
                                 "type": "ptt_start",
                                 "name": display_name,
-                            }, exclude=ws)
+                                "id": cid,
+                            }, exclude=session)
                             log.info(f"[{room_code}] PTT start — '{display_name}'")
 
                     elif msg_type == "ptt_end":
-                        if room_speaker[room_code] == ws:
+                        if room_speaker.get(room_code) is session:
                             room_speaker[room_code] = None
                             _cancel_speaker_timeout(room_code)
-                        if ws in pcm_buffers:
-                            pcm_buffers[ws].clear()
-                        await broadcast_json(room_code, {"type": "ptt_end"}, exclude=ws)
+                        if session.buffer is not None:
+                            session.buffer.clear()
+                        await broadcast_json(room_code, {"type": "ptt_end"}, exclude=session)
                         log.info(f"[{room_code}] PTT end — '{display_name}'")
 
                     elif msg_type == "ping":
+                        session.heartbeat = True
                         await ws.send_text(json.dumps({"type": "pong"}))
 
                 except json.JSONDecodeError:
@@ -296,27 +420,4 @@ async def websocket_endpoint(
     except Exception as e:
         log.error(f"[{room_code}] Error: {e}")
     finally:
-        already_removed = ws not in rooms[room_code]
-        rooms[room_code].discard(ws)
-        client_names.pop(ws, None)
-        client_codec.pop(ws, None)
-        opus_decoders.pop(ws, None)
-        pcm_encoders.pop(ws, None)
-        pcm_buffers.pop(ws, None)
-        if room_speaker[room_code] == ws:
-            room_speaker[room_code] = None
-            _cancel_speaker_timeout(room_code)
-
-        remaining = len(rooms[room_code])
-        log.info(f"[{room_code}] '{display_name}' desconectado. Restantes: {remaining}")
-
-        if not already_removed and remaining > 0:
-            await broadcast_json(room_code, {
-                "type": "user_left",
-                "count": remaining,
-                "name": display_name,
-            })
-
-        if not rooms[room_code]:
-            del rooms[room_code]
-            room_speaker.pop(room_code, None)
+        await _drop(session, reason="desconectado")

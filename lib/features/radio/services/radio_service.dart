@@ -1,17 +1,33 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
 import '../../../core/constants.dart';
+import '../../../core/device_id.dart';
 import '../../../core/log_service.dart';
 import 'audio_service.dart';
 
 enum RadioState { disconnected, connecting, connected, transmitting, receiving }
 
+class RoomUser {
+  final String id;
+  final String name;
+  final int build;
+
+  const RoomUser({required this.id, required this.name, this.build = 0});
+
+  bool get isOutdated => build > 0 && build < kAppBuild;
+}
+
 class RadioService {
+  static const int _reconnectBaseMs = 1000;
+  static const int _reconnectMaxMs = 30000;
+
   final AudioService _audio = AudioService();
+  final math.Random _rand = math.Random();
 
   WebSocketChannel? _channel;
   StreamSubscription? _wsSub;
@@ -20,10 +36,13 @@ class RadioService {
   Timer? _pingTimer;
   Timer? _connectivityDebounce;
   bool _pendingPong = false;
+  bool _connectInFlight = false;
+  int _reconnectAttempt = 0;
 
   String _roomCode = '';
   String _password = '';
   String _userName = '';
+  String _clientId = '';
   int _userCount = 0;
   bool _disposed = false;
   bool muted = false;
@@ -33,21 +52,22 @@ class RadioService {
   final _stateCtrl = StreamController<RadioState>.broadcast();
   final _userCountCtrl = StreamController<int>.broadcast();
   final _errorCtrl = StreamController<String>.broadcast();
-  final _usersCtrl = StreamController<List<String>>.broadcast();
+  final _usersCtrl = StreamController<List<RoomUser>>.broadcast();
   final _speakerCtrl = StreamController<String?>.broadcast();
   final _channelBusyCtrl = StreamController<String>.broadcast();
 
   // Mutable list tracked locally
-  final List<String> _users = [];
+  final List<RoomUser> _users = [];
 
   Stream<RadioState> get stateStream => _stateCtrl.stream;
   Stream<int> get userCountStream => _userCountCtrl.stream;
   Stream<String> get errorStream => _errorCtrl.stream;
-  Stream<List<String>> get usersStream => _usersCtrl.stream;
+  Stream<List<RoomUser>> get usersStream => _usersCtrl.stream;
   Stream<String?> get speakerStream => _speakerCtrl.stream;
   Stream<String> get channelBusyStream => _channelBusyCtrl.stream;
   RadioState get state => _state;
   int get userCount => _userCount;
+  String get clientId => _clientId;
 
   Future<void> init() async {
     await _audio.init();
@@ -60,6 +80,14 @@ class RadioService {
     _password = password;
     _userName = userName.isNotEmpty ? userName : 'Usuario';
     _disposed = false;
+    _reconnectAttempt = 0;
+    if (_clientId.isEmpty) {
+      try {
+        _clientId = await loadClientId();
+      } catch (e) {
+        log.error('No se pudo leer client_id persistido', e);
+      }
+    }
     _startConnectivityListener();
     await _connect();
   }
@@ -75,20 +103,21 @@ class RadioService {
       // Debounce: connectivity fires multiple rapid events; wait for the last one
       _connectivityDebounce?.cancel();
       _connectivityDebounce = Timer(const Duration(milliseconds: 600), () {
-        if (_disposed || _state == RadioState.connecting) return;
+        if (_disposed || _connectInFlight) return;
         log.info('Red cambiada — reconectando WebSocket');
-        _reconnectTimer?.cancel();
         _pingTimer?.cancel();
         _wsSub?.cancel();
         try { _channel?.sink.close(); } catch (_) {}
         _channel = null;
-        _connect();
+        _setState(RadioState.disconnected);
+        _scheduleReconnect(immediate: true);
       });
     });
   }
 
   Future<void> _connect() async {
-    if (_state == RadioState.connecting) return;
+    if (_connectInFlight || _disposed) return;
+    _connectInFlight = true;
     _setState(RadioState.connecting);
     try {
       final params = <String, String>{
@@ -96,6 +125,7 @@ class RadioService {
         'codec': 'opus',
         'build': kAppBuild.toString(),
       };
+      if (_clientId.isNotEmpty) params['client_id'] = _clientId;
       if (_password.isNotEmpty) params['password'] = Uri.encodeComponent(_password);
       final query = params.entries.map((e) => '${e.key}=${e.value}').join('&');
       final uri = Uri.parse('$kServerWsUrl/$_roomCode?$query');
@@ -115,12 +145,15 @@ class RadioService {
       );
 
       log.info('WS connected');
+      _reconnectAttempt = 0;
       _setState(RadioState.connected);
       _startPing();
     } catch (e) {
       log.error('WS connect failed', e);
       _setState(RadioState.disconnected);
       _scheduleReconnect();
+    } finally {
+      _connectInFlight = false;
     }
   }
 
@@ -141,31 +174,19 @@ class RadioService {
         final type = msg['type'] as String? ?? '';
         switch (type) {
           case 'welcome':
-            _userCount = (msg['count'] as int?) ?? 1;
-            _userCountCtrl.add(_userCount);
-            final rawUsers = msg['users'] as List<dynamic>? ?? [];
-            _users
-              ..clear()
-              ..addAll(rawUsers.cast<String>());
-            _usersCtrl.add(List.unmodifiable(_users));
-            log.info('welcome: ${_users.join(", ")}');
+            final you = msg['you'] as String?;
+            if (you != null && you.isNotEmpty) _clientId = you;
+            _applyRoster(msg);
+            log.info('welcome: ${_users.map((u) => "${u.name}(b${u.build})").join(", ")}');
 
           case 'user_joined':
-            _userCount = (msg['count'] as int?) ?? _userCount;
-            _userCountCtrl.add(_userCount);
-            final joined = msg['name'] as String? ?? 'Usuario';
-            if (!_users.contains(joined)) _users.add(joined);
-            _usersCtrl.add(List.unmodifiable(_users));
-            log.info('user_joined: $joined');
+            _applyRoster(msg, fallbackJoined: msg['name'] as String?);
+            log.info('user_joined: ${msg['name']}');
 
           case 'user_left':
-            _userCount = (msg['count'] as int?) ?? _userCount;
-            _userCountCtrl.add(_userCount);
-            final left = msg['name'] as String? ?? '';
-            _users.remove(left);
-            _usersCtrl.add(List.unmodifiable(_users));
+            _applyRoster(msg, fallbackLeft: msg['name'] as String?);
             _speakerCtrl.add(null);
-            log.info('user_left: $left');
+            log.info('user_left: ${msg['name']}');
 
           case 'ptt_start':
             if (_state != RadioState.transmitting) _setState(RadioState.receiving);
@@ -199,10 +220,51 @@ class RadioService {
     }
   }
 
+  /// Aplica la foto completa del roster. Si el servidor no la manda (versión
+  /// antigua), cae al modo incremental con el nombre del evento.
+  void _applyRoster(Map<String, dynamic> msg, {String? fallbackJoined, String? fallbackLeft}) {
+    final snapshot = _parseRoster(msg);
+    if (snapshot != null) {
+      _users
+        ..clear()
+        ..addAll(snapshot);
+    } else if (fallbackJoined != null && fallbackJoined.isNotEmpty) {
+      if (!_users.any((u) => u.name == fallbackJoined)) {
+        _users.add(RoomUser(id: '', name: fallbackJoined));
+      }
+    } else if (fallbackLeft != null && fallbackLeft.isNotEmpty) {
+      _users.removeWhere((u) => u.name == fallbackLeft);
+    }
+
+    _userCount = snapshot != null
+        ? _users.length
+        : ((msg['count'] as int?) ?? _users.length);
+    _userCountCtrl.add(_userCount);
+    _usersCtrl.add(List.unmodifiable(_users));
+  }
+
+  List<RoomUser>? _parseRoster(Map<String, dynamic> msg) {
+    final roster = msg['roster'];
+    if (roster is List) {
+      return roster.whereType<Map>().map((e) => RoomUser(
+            id: (e['id'] as String?) ?? '',
+            name: (e['name'] as String?) ?? 'Usuario',
+            build: (e['build'] as num?)?.toInt() ?? 0,
+          )).toList();
+    }
+    final legacy = msg['users'];
+    if (legacy is List) {
+      return legacy.map((e) => RoomUser(id: '', name: e.toString())).toList();
+    }
+    return null;
+  }
+
   void _onDisconnected() {
     log.warn('WS desconectado');
     _pingTimer?.cancel();
     _wsSub?.cancel();
+    try { _channel?.sink.close(); } catch (_) {}
+    _channel = null;
     _users.clear();
     _usersCtrl.add([]);
     _speakerCtrl.add(null);
@@ -212,9 +274,25 @@ class RadioService {
     }
   }
 
-  void _scheduleReconnect() {
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 1), () {
+  /// Backoff exponencial con jitter (1s→30s). Un solo timer vivo a la vez: las
+  /// llamadas concurrentes (stream onDone + onError + pong timeout) colapsan.
+  void _scheduleReconnect({bool immediate = false}) {
+    if (_disposed || _roomCode.isEmpty) return;
+    if (immediate) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _reconnectAttempt = 0;
+    } else if (_reconnectTimer?.isActive ?? false) {
+      return;
+    }
+
+    final base = math.min(_reconnectMaxMs, _reconnectBaseMs << math.min(_reconnectAttempt, 5));
+    final delayMs = base ~/ 2 + _rand.nextInt(base ~/ 2 + 1);
+    _reconnectAttempt++;
+    log.info('Reconexión en ${delayMs}ms (intento $_reconnectAttempt)');
+
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
+      _reconnectTimer = null;
       if (!_disposed && _roomCode.isNotEmpty) _connect();
     });
   }
@@ -283,7 +361,9 @@ class RadioService {
 
   Future<void> disconnect() async {
     _disposed = true;
+    _reconnectAttempt = 0;
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _pingTimer?.cancel();
     _connectivityDebounce?.cancel();
     _connectivitySub?.cancel();

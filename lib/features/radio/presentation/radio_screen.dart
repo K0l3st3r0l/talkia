@@ -31,7 +31,7 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
 
   RadioState _state = RadioState.disconnected;
   int _userCount = 0;
-  List<String> _users = [];
+  List<RoomUser> _users = [];
   String? _speaker;
   String? _lastSpeaker;
   int _roomCodeTaps = 0;
@@ -518,9 +518,17 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                    children: _users.map((name) {
-                      final isSpeaker = name == _speaker;
-                      final isMe = name == widget.userName;
+                    children: _users.map((user) {
+                      final isSpeaker = user.name == _speaker;
+                      final isMe = user.id.isNotEmpty
+                          ? user.id == _radio.clientId
+                          : user.name == widget.userName;
+                      final outdated = user.isOutdated;
+                      final nameColor = isSpeaker
+                          ? AppTheme.receiveColor
+                          : isMe
+                              ? AppTheme.accent
+                              : AppTheme.textSecondary;
                       return Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: AnimatedContainer(
@@ -534,9 +542,11 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                             border: Border.all(
                               color: isSpeaker
                                   ? AppTheme.receiveColor
-                                  : isMe
-                                      ? AppTheme.accent.withOpacity(0.5)
-                                      : Colors.transparent,
+                                  : outdated
+                                      ? AppTheme.warnColor.withOpacity(0.6)
+                                      : isMe
+                                          ? AppTheme.accent.withOpacity(0.5)
+                                          : Colors.transparent,
                               width: 1.5,
                             ),
                           ),
@@ -548,15 +558,39 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                                 const SizedBox(width: 4),
                               ],
                               Text(
-                                isMe ? '$name (tú)' : name,
+                                isMe ? '${user.name} (tú)' : user.name,
                                 style: TextStyle(
-                                  color: isSpeaker
-                                      ? AppTheme.receiveColor
-                                      : isMe
-                                          ? AppTheme.accent
-                                          : AppTheme.textSecondary,
+                                  color: nameColor,
                                   fontSize: 12,
                                   fontWeight: isSpeaker ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: outdated
+                                      ? AppTheme.warnColor.withOpacity(0.18)
+                                      : AppTheme.background.withOpacity(0.6),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (outdated) ...[
+                                      const Icon(Icons.system_update_alt,
+                                          size: 9, color: AppTheme.warnColor),
+                                      const SizedBox(width: 2),
+                                    ],
+                                    Text(
+                                      user.build > 0 ? 'b${user.build}' : 'b?',
+                                      style: TextStyle(
+                                        color: outdated ? AppTheme.warnColor : AppTheme.textSecondary,
+                                        fontSize: 9,
+                                        fontWeight: outdated ? FontWeight.bold : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],

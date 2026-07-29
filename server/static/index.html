@@ -136,6 +136,15 @@
     min-height: 36px;
   }
   #users-row::-webkit-scrollbar { display: none; }
+  .build-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 6px;
+    background: rgba(0,0,0,.35);
+    color: #777;
+  }
+  .user-chip.outdated { border-color: rgba(255,176,32,.6); }
+  .user-chip.outdated .build-badge { background: rgba(255,176,32,.18); color: #FFB020; font-weight: 700; }
   .user-chip {
     display: flex;
     align-items: center;
@@ -334,7 +343,17 @@ const OTA_APK_URL = 'https://ota.laravas.com/talkia-latest.apk';
 const DEFAULT_ROOM = '76961';
 const SAMPLE_RATE = 16000;
 
+const PING_INTERVAL_MS = 10000;
+
+// Identidad estable de este navegador: el servidor indexa el roster por client_id
+let myId = localStorage.getItem('talkia_client_id');
+if (!myId) {
+  myId = 'web-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+  localStorage.setItem('talkia_client_id', myId);
+}
+
 let ws = null;
+let pingTimer = null;
 let roomCode = '';
 let roomPassword = '';
 let myName = '';
@@ -428,17 +447,28 @@ roomInput.addEventListener('input', () => {
   updatePasswordVisibility();
 });
 
+// Roster: acepta la foto completa en objetos {id,name,build} o el formato legacy de strings
+function parseRoster(msg) {
+  if (Array.isArray(msg.roster)) return msg.roster.map(u => ({ id: u.id || '', name: u.name || 'Usuario', build: u.build || 0 }));
+  if (Array.isArray(msg.users)) return msg.users.map(n => ({ id: '', name: n, build: 0 }));
+  return null;
+}
+
 // Users chips
 function renderUsers() {
   usersRow.innerHTML = '';
-  users.forEach(name => {
+  users.forEach(user => {
+    const isMe = user.id ? user.id === myId : user.name === myName;
+    const isSpeaking = user.name === currentSpeaker;
+    const outdated = user.build > 0 && otaBuild > 0 && user.build < otaBuild;
     const chip = document.createElement('div');
     chip.className = 'user-chip' +
-      (name === myName ? ' me' : '') +
-      (name === currentSpeaker ? ' speaking' : '');
-    chip.innerHTML = name === currentSpeaker
-      ? `<span class="mic-icon">🎙</span>${name === myName ? name + ' (tú)' : name}`
-      : (name === myName ? name + ' (tú)' : name);
+      (isMe ? ' me' : '') +
+      (isSpeaking ? ' speaking' : '') +
+      (outdated ? ' outdated' : '');
+    const label = isMe ? user.name + ' (tú)' : user.name;
+    const badge = `<span class="build-badge">${outdated ? '⬆ ' : ''}${user.build > 0 ? 'b' + user.build : 'b?'}</span>`;
+    chip.innerHTML = (isSpeaking ? '<span class="mic-icon">🎙</span>' : '') + label + badge;
     usersRow.appendChild(chip);
   });
 }
@@ -482,12 +512,20 @@ function updateUsers(count) {
 // WebSocket
 function connect(room, password, name) {
   setState('connecting');
-  const params = [`name=${encodeURIComponent(name)}`];
+  const params = [`name=${encodeURIComponent(name)}`, `client_id=${encodeURIComponent(myId)}`];
   if (password) params.push(`password=${encodeURIComponent(password)}`);
   ws = new WebSocket(`${WS_BASE}/${room}?${params.join('&')}`);
   ws.binaryType = 'arraybuffer';
 
-  ws.onopen = () => setState('connected');
+  ws.onopen = () => {
+    setState('connected');
+    // Sin este heartbeat el reaper del servidor no puede distinguir un oyente
+    // idle de una conexión fantasma
+    clearInterval(pingTimer);
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+    }, PING_INTERVAL_MS);
+  };
 
   ws.onmessage = (ev) => {
     if (ev.data instanceof ArrayBuffer) {
@@ -500,18 +538,14 @@ function connect(room, password, name) {
     }
     try {
       const msg = JSON.parse(ev.data);
-      if (msg.type === 'welcome') {
-        updateUsers(msg.count);
-        users = msg.users || [];
-        renderUsers();
-      } else if (msg.type === 'user_joined') {
-        updateUsers(msg.count);
-        if (msg.name && !users.includes(msg.name)) users.push(msg.name);
-        renderUsers();
-      } else if (msg.type === 'user_left') {
-        updateUsers(msg.count);
-        users = users.filter(u => u !== msg.name);
-        if (currentSpeaker === msg.name) currentSpeaker = null;
+      if (msg.type === 'welcome' || msg.type === 'user_joined' || msg.type === 'user_left') {
+        if (msg.type === 'welcome' && msg.you) myId = msg.you;
+        const snapshot = parseRoster(msg);
+        if (snapshot) users = snapshot;
+        else if (msg.type === 'user_joined' && msg.name) users.push({ id: '', name: msg.name, build: 0 });
+        else if (msg.type === 'user_left') users = users.filter(u => u.name !== msg.name);
+        if (msg.type === 'user_left' && currentSpeaker === msg.name) currentSpeaker = null;
+        updateUsers(snapshot ? users.length : (msg.count || users.length));
         renderUsers();
       } else if (msg.type === 'ptt_start') {
         currentSpeaker = msg.name || null;
@@ -531,6 +565,8 @@ function connect(room, password, name) {
   };
 
   ws.onclose = () => {
+    clearInterval(pingTimer);
+    pingTimer = null;
     setState('disconnected');
     users = [];
     currentSpeaker = null;
@@ -641,6 +677,7 @@ function leaveRoom() {
   reconnectAllowed = false;
   transmitting = false;
   stopRecording();
+  clearInterval(pingTimer); pingTimer = null;
   ws?.close(); ws = null;
   users = []; currentSpeaker = null;
   setState('disconnected');

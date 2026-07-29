@@ -7,6 +7,7 @@ class AppTheme {
   static const Color transmitColor = Color(0xFFFF4444);
   static const Color receiveColor = Color(0xFF00CC66);
   static const Color idleColor = Color(0xFF3A3A4A);
+  static const Color warnColor = Color(0xFFFFB020);
   static const Color textPrimary = Color(0xFFE8E8F0);
   static const Color textSecondary = Color(0xFF7A7A8A);
 
