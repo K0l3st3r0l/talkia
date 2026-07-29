@@ -1,7 +1,7 @@
 {
-  "version": "1.0.28",
-  "build": 28,
-  "min_build": 28,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=28",
-  "changelog": "fix: bloqueo de canal + timeout 30s al hablar simultaneamente"
+  "version": "1.0.29",
+  "build": 29,
+  "min_build": 0,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=29",
+  "changelog": "presencia real: client_id estable, reaper de fantasmas, roster completo y backoff de reconexion"
 }

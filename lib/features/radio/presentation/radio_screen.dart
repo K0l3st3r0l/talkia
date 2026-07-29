@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/constants.dart';
@@ -29,7 +30,6 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
   final RadioService _radio = RadioService();
 
   RadioState _state = RadioState.disconnected;
-  int _userCount = 0;
   List<RoomUser> _users = [];
   String? _speaker;
   String? _lastSpeaker;
@@ -37,16 +37,22 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
   bool _muted = false;
   double _volume = 1.0;
 
+  // Distingue "primera conexión" de "se cayó y está reintentando" para no
+  // mostrar un DESCONECTADO que sugiere inacción cuando el backoff ya está
+  // corriendo solo (ver RadioService._scheduleReconnect).
+  bool _hasConnectedOnce = false;
+  bool _hasNetwork = true;
+
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
   late AnimationController _waveCtrl;
 
   StreamSubscription? _stateSub;
-  StreamSubscription? _countSub;
   StreamSubscription? _errorSub;
   StreamSubscription? _usersSub;
   StreamSubscription? _speakerSub;
   StreamSubscription? _channelBusySub;
+  StreamSubscription? _connectivitySub;
 
   Timer? _otaTimer;
   bool _hasUpdate = false;
@@ -75,6 +81,11 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     _init();
   }
 
+  bool _hasAnyNetwork(List<ConnectivityResult> results) => results.any((r) =>
+      r == ConnectivityResult.wifi ||
+      r == ConnectivityResult.mobile ||
+      r == ConnectivityResult.ethernet);
+
   void _onRoomCodeTap() {
     _roomCodeTaps++;
     if (_roomCodeTaps >= 3) {
@@ -91,10 +102,15 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     _hasMicPermission = status.isGranted;
 
     _stateSub = _radio.stateStream.listen((s) {
-      if (mounted) setState(() => _state = s);
-    });
-    _countSub = _radio.userCountStream.listen((c) {
-      if (mounted) setState(() => _userCount = c);
+      if (!mounted) return;
+      setState(() {
+        _state = s;
+        if (s == RadioState.connected ||
+            s == RadioState.transmitting ||
+            s == RadioState.receiving) {
+          _hasConnectedOnce = true;
+        }
+      });
     });
     _usersSub = _radio.usersStream.listen((u) {
       if (mounted) setState(() => _users = u);
@@ -127,6 +143,13 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
           backgroundColor: AppTheme.receiveColor,
           duration: const Duration(seconds: 2),
         ));
+    });
+
+    final initialConnectivity = await Connectivity().checkConnectivity();
+    _hasNetwork = _hasAnyNetwork(initialConnectivity);
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      if (!mounted) return;
+      setState(() => _hasNetwork = _hasAnyNetwork(results));
     });
 
     await _radio.connect(
@@ -323,7 +346,31 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     await _radio.stopTransmitting();
   }
 
+  // El backoff de RadioService reintenta solo (ver protocolo-presencia en la
+  // wiki): mientras hubo conexión antes, "disconnected"/"connecting" es en
+  // los hechos una reconexión en curso, no un estado terminal.
+  bool get _isReconnecting =>
+      _hasConnectedOnce &&
+      (_state == RadioState.disconnected || _state == RadioState.connecting);
+
+  // El único camino que deja usuarios "viejos" en pantalla mientras no hay
+  // conexión activa es el reconnect por cambio de red (no limpia el roster
+  // para evitar parpadeo en cortes cortos) — ver
+  // RadioService._startConnectivityListener.
+  // La fórmula de RoomUser.isOutdated compara contra kAppBuild propio, así
+  // que nunca puede marcarme a mí mismo — se deriva acá comparando contra el
+  // build más alto visto en la sala.
+  bool get _selfBuildBehind => _users.any((u) => u.build > kAppBuild);
+
+  bool get _rosterMaybeStale =>
+      _users.isNotEmpty &&
+      _state != RadioState.connected &&
+      _state != RadioState.transmitting &&
+      _state != RadioState.receiving;
+
   Color get _buttonColor {
+    if (!_hasNetwork) return AppTheme.transmitColor;
+    if (_isReconnecting) return AppTheme.warnColor;
     switch (_state) {
       case RadioState.transmitting:
         return AppTheme.transmitColor;
@@ -337,9 +384,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
   }
 
   String get _statusLabel {
+    if (!_hasNetwork) return 'SIN CONEXIÓN A INTERNET';
+    if (_isReconnecting) return 'RECONECTANDO...';
     switch (_state) {
       case RadioState.disconnected:
-        return 'DESCONECTADO';
       case RadioState.connecting:
         return 'CONECTANDO...';
       case RadioState.connected:
@@ -353,6 +401,25 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     }
   }
 
+  String get _pttSemanticLabel {
+    if (!_hasNetwork) return 'Sin conexión a internet. Botón de hablar no disponible.';
+    if (_isReconnecting) return 'Reconectando a la sala. Botón de hablar no disponible.';
+    switch (_state) {
+      case RadioState.transmitting:
+        return 'Transmitiendo. Suelta para terminar.';
+      case RadioState.receiving:
+        final speaker = _speaker;
+        return speaker != null && speaker.isNotEmpty
+            ? '$speaker está hablando. Canal ocupado, botón de hablar no disponible.'
+            : 'Recibiendo audio. Canal ocupado, botón de hablar no disponible.';
+      case RadioState.connected:
+        return 'Botón de hablar. Mantén presionado para transmitir.';
+      case RadioState.disconnected:
+      case RadioState.connecting:
+        return 'Conectando a la sala. Botón de hablar no disponible.';
+    }
+  }
+
   bool get _isActive =>
       _state == RadioState.transmitting || _state == RadioState.receiving;
 
@@ -363,11 +430,11 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     _waveCtrl.dispose();
     _otaTimer?.cancel();
     _stateSub?.cancel();
-    _countSub?.cancel();
     _errorSub?.cancel();
     _usersSub?.cancel();
     _speakerSub?.cancel();
     _channelBusySub?.cancel();
+    _connectivitySub?.cancel();
     _radio.dispose();
     super.dispose();
   }
@@ -435,20 +502,25 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
             ),
             Padding(
               padding: const EdgeInsets.only(right: 16),
-              child: Row(
-                children: [
-                  Icon(Icons.people, size: 14,
-                    color: _userCount > 1 ? AppTheme.receiveColor : AppTheme.textSecondary),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${_users.length}',
-                    style: TextStyle(
-                      color: _users.length > 1 ? AppTheme.receiveColor : AppTheme.textSecondary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
+              child: Semantics(
+                label: _users.length == 1
+                    ? '1 usuario conectado en la sala'
+                    : '${_users.length} usuarios conectados en la sala',
+                child: Row(
+                  children: [
+                    Icon(Icons.people, size: 14,
+                      color: _users.length > 1 ? AppTheme.receiveColor : AppTheme.textSecondary),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${_users.length}',
+                      style: TextStyle(
+                        color: _users.length > 1 ? AppTheme.receiveColor : AppTheme.textSecondary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -461,27 +533,34 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
               padding: const EdgeInsets.symmetric(vertical: 8),
               color: AppTheme.surface,
               child: Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      width: 8, height: 8,
-                      decoration: BoxDecoration(shape: BoxShape.circle, color: _buttonColor),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _state == RadioState.receiving && _speaker != null
-                          ? 'HABLANDO: $_statusLabel'
-                          : _statusLabel,
-                      style: TextStyle(
-                        color: _buttonColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 2,
+                child: Semantics(
+                  liveRegion: true,
+                  excludeSemantics: true,
+                  label: _state == RadioState.receiving && _speaker != null
+                      ? 'HABLANDO: $_statusLabel'
+                      : _statusLabel,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: 8, height: 8,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: _buttonColor),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      Text(
+                        _state == RadioState.receiving && _speaker != null
+                            ? 'HABLANDO: $_statusLabel'
+                            : _statusLabel,
+                        style: TextStyle(
+                          color: _buttonColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -514,90 +593,138 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                 width: double.infinity,
                 color: AppTheme.background,
                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: _users.map((user) {
-                      final isSpeaker = user.name == _speaker;
-                      final isMe = user.id.isNotEmpty
-                          ? user.id == _radio.clientId
-                          : user.name == widget.userName;
-                      final outdated = user.isOutdated;
-                      final nameColor = isSpeaker
-                          ? AppTheme.receiveColor
-                          : isMe
-                              ? AppTheme.accent
-                              : AppTheme.textSecondary;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: isSpeaker
-                                ? AppTheme.receiveColor.withOpacity(0.2)
-                                : AppTheme.surface,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isSpeaker
-                                  ? AppTheme.receiveColor
-                                  : outdated
-                                      ? AppTheme.warnColor.withOpacity(0.6)
-                                      : isMe
-                                          ? AppTheme.accent.withOpacity(0.5)
-                                          : Colors.transparent,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_rosterMaybeStale)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Semantics(
+                          label: 'Lista de usuarios puede estar desactualizada, reconectando',
+                          child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (isSpeaker) ...[
-                                const Icon(Icons.mic, size: 12, color: AppTheme.receiveColor),
-                                const SizedBox(width: 4),
-                              ],
+                              Icon(Icons.sync_problem, size: 12, color: AppTheme.warnColor),
+                              SizedBox(width: 4),
                               Text(
-                                isMe ? '${user.name} (tú)' : user.name,
-                                style: TextStyle(
-                                  color: nameColor,
-                                  fontSize: 12,
-                                  fontWeight: isSpeaker ? FontWeight.bold : FontWeight.normal,
-                                ),
-                              ),
-                              const SizedBox(width: 5),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: outdated
-                                      ? AppTheme.warnColor.withOpacity(0.18)
-                                      : AppTheme.background.withOpacity(0.6),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (outdated) ...[
-                                      const Icon(Icons.system_update_alt,
-                                          size: 9, color: AppTheme.warnColor),
-                                      const SizedBox(width: 2),
-                                    ],
-                                    Text(
-                                      user.build > 0 ? 'b${user.build}' : 'b?',
-                                      style: TextStyle(
-                                        color: outdated ? AppTheme.warnColor : AppTheme.textSecondary,
-                                        fontSize: 9,
-                                        fontWeight: outdated ? FontWeight.bold : FontWeight.normal,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                'LISTA PUEDE ESTAR DESACTUALIZADA',
+                                style: TextStyle(color: AppTheme.warnColor, fontSize: 10, letterSpacing: 1),
                               ),
                             ],
                           ),
                         ),
-                      );
-                    }).toList(),
-                  ),
+                      ),
+                    AnimatedOpacity(
+                      duration: const Duration(milliseconds: 300),
+                      opacity: _rosterMaybeStale ? 0.55 : 1.0,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _users.map((user) {
+                            final isSpeaker = user.name == _speaker;
+                            final isMe = user.id.isNotEmpty
+                                ? user.id == _radio.clientId
+                                : user.name == widget.userName;
+                            final outdated = user.isOutdated || (isMe && _selfBuildBehind);
+                            final nameColor = isSpeaker
+                                ? AppTheme.receiveColor
+                                : isMe
+                                    ? AppTheme.accent
+                                    : AppTheme.textSecondary;
+                            final displayName = isMe ? '${user.name} (tú)' : user.name;
+                            final semanticLabel = [
+                              displayName,
+                              if (isSpeaker) 'hablando',
+                              if (outdated) 'versión desactualizada',
+                              user.build > 0 ? 'build ${user.build}' : 'build desconocido',
+                            ].join(', ');
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Tooltip(
+                                message: semanticLabel,
+                                child: Semantics(
+                                  label: semanticLabel,
+                                  child: ExcludeSemantics(
+                                    child: AnimatedContainer(
+                                      duration: const Duration(milliseconds: 200),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: isSpeaker
+                                            ? AppTheme.receiveColor.withOpacity(0.2)
+                                            : AppTheme.surface,
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
+                                          color: isSpeaker
+                                              ? AppTheme.receiveColor
+                                              : outdated
+                                                  ? AppTheme.warnColor.withOpacity(0.6)
+                                                  : isMe
+                                                      ? AppTheme.accent.withOpacity(0.5)
+                                                      : Colors.transparent,
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (isSpeaker) ...[
+                                            const Icon(Icons.mic, size: 12, color: AppTheme.receiveColor),
+                                            const SizedBox(width: 4),
+                                          ],
+                                          ConstrainedBox(
+                                            constraints: const BoxConstraints(maxWidth: 120),
+                                            child: Text(
+                                              displayName,
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 1,
+                                              softWrap: false,
+                                              style: TextStyle(
+                                                color: nameColor,
+                                                fontSize: 12,
+                                                fontWeight: isSpeaker ? FontWeight.bold : FontWeight.normal,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 5),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                            decoration: BoxDecoration(
+                                              color: outdated
+                                                  ? AppTheme.warnColor.withOpacity(0.18)
+                                                  : AppTheme.background.withOpacity(0.6),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (outdated) ...[
+                                                  const Icon(Icons.system_update_alt,
+                                                      size: 9, color: AppTheme.warnColor),
+                                                  const SizedBox(width: 2),
+                                                ],
+                                                Text(
+                                                  user.build > 0 ? 'b${user.build}' : 'b?',
+                                                  style: TextStyle(
+                                                    color: outdated ? AppTheme.warnColor : AppTheme.textSecondary,
+                                                    fontSize: 9,
+                                                    fontWeight: outdated ? FontWeight.bold : FontWeight.normal,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
 
@@ -618,35 +745,42 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                               painter: _WavePainter(_waveCtrl.value, _buttonColor),
                             ),
                           ),
-                        Listener(
-                          onPointerDown: (_) => _onPttStart(),
-                          onPointerUp: (_) => _onPttEnd(),
-                          onPointerCancel: (_) => _onPttEnd(),
-                          child: AnimatedBuilder(
-                            animation: _pulseAnim,
-                            builder: (_, child) => Transform.scale(
-                              scale: _state == RadioState.transmitting ? _pulseAnim.value : 1.0,
-                              child: child,
-                            ),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              width: 160, height: 160,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _buttonColor.withOpacity(0.15),
-                                border: Border.all(color: _buttonColor, width: _isActive ? 4 : 2),
-                                boxShadow: _isActive
-                                    ? [BoxShadow(color: _buttonColor.withOpacity(0.4), blurRadius: 30, spreadRadius: 8)]
-                                    : [],
-                              ),
-                              child: Icon(
-                                _state == RadioState.transmitting
-                                    ? Icons.mic
-                                    : _state == RadioState.receiving
-                                        ? Icons.volume_up
-                                        : Icons.mic_none,
-                                color: _buttonColor,
-                                size: 72,
+                        Semantics(
+                          button: true,
+                          enabled: _state == RadioState.connected,
+                          label: _pttSemanticLabel,
+                          child: ExcludeSemantics(
+                            child: Listener(
+                              onPointerDown: (_) => _onPttStart(),
+                              onPointerUp: (_) => _onPttEnd(),
+                              onPointerCancel: (_) => _onPttEnd(),
+                              child: AnimatedBuilder(
+                                animation: _pulseAnim,
+                                builder: (_, child) => Transform.scale(
+                                  scale: _state == RadioState.transmitting ? _pulseAnim.value : 1.0,
+                                  child: child,
+                                ),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  width: 160, height: 160,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _buttonColor.withOpacity(0.15),
+                                    border: Border.all(color: _buttonColor, width: _isActive ? 4 : 2),
+                                    boxShadow: _isActive
+                                        ? [BoxShadow(color: _buttonColor.withOpacity(0.4), blurRadius: 30, spreadRadius: 8)]
+                                        : [],
+                                  ),
+                                  child: Icon(
+                                    _state == RadioState.transmitting
+                                        ? Icons.mic
+                                        : _state == RadioState.receiving
+                                            ? Icons.volume_up
+                                            : Icons.mic_none,
+                                    color: _buttonColor,
+                                    size: 72,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
