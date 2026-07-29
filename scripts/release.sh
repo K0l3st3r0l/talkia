@@ -69,16 +69,25 @@ fi
 cp "$APK_LOCAL" "$OTA_RELEASES/$APK_NAME"
 
 # ── Actualizar version.json ───────────────────────────────────────────────────
+# min_build no se auto-sube a $BUILD en cada release: eso disparaba el banner de
+# "actualización requerida" en cada versión aunque el server (MIN_BUILD env) no
+# bloqueara a nadie. Se mantiene el valor del release anterior; para forzar una
+# actualización real, subirlo a mano en este archivo (y en MIN_BUILD del server).
 CHANGELOG="${2:-Versión $VERSION}"
+PREV_MIN_BUILD=0
+if [[ -f "$OTA_RELEASES/version.json" ]]; then
+  PREV_MIN_BUILD=$(jq -r '.min_build // 0' "$OTA_RELEASES/version.json")
+fi
 cat > "$OTA_RELEASES/version.json" <<EOF
 {
   "version": "$VERSION",
   "build": $BUILD,
-  "min_build": $BUILD,
+  "min_build": $PREV_MIN_BUILD,
   "url": "https://ota.laravas.com/talkia-latest.apk?v=$BUILD",
   "changelog": "$CHANGELOG"
 }
 EOF
+echo "▶ min_build se mantiene en $PREV_MIN_BUILD (editar version.json a mano si se quiere forzar actualización)"
 
 echo ""
 echo "🚀 Deploy completo:"

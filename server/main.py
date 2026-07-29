@@ -52,8 +52,11 @@ class Session:
     build: int
     room: str
     last_seen: float
-    # Solo se expulsa por inactividad a quien demostró que pinguea; los clientes
-    # antiguos que nunca pinguean conservan el comportamiento previo.
+    # Elegibilidad para el reaper por tipo de cliente, no por haber pingueado ya:
+    # exigir el primer ping dejaba fantasmas inmortales si la conexión moría en
+    # la ventana de 10s antes de que llegara. codec == "opus" es la app Android,
+    # que siempre pinguea; el único exento real es un navegador con index.html
+    # cacheado viejo (pcm sin client_id) — ver bugs/usuarios-fantasma.md.
     heartbeat: bool = False
     gone: bool = False
     decoder: opuslib.Decoder | None = None
@@ -324,6 +327,9 @@ async def websocket_endpoint(
         log.info(f"[{room_code}] '{display_name}' reconectó con client_id {cid} — reemplazando sesión anterior")
         await _drop(previous, reason="sesión reemplazada", announce=False)
 
+    # Reapable desde el connect si el cliente es de un tipo que pinguea.
+    reapable = codec_val == "opus" or bool(stable_id)
+
     session = Session(
         ws=ws,
         client_id=cid,
@@ -332,8 +338,14 @@ async def websocket_endpoint(
         build=build,
         room=room_code,
         last_seen=time.monotonic(),
-        heartbeat=bool(stable_id),
+        heartbeat=reapable,
     )
+
+    if not reapable:
+        log.info(
+            f"[{room_code}] '{display_name}' ({codec_val}, sin client_id) conectado exento del reaper — "
+            f"navegador con index.html cacheado viejo, no pinguea"
+        )
 
     if codec_val == "opus":
         session.decoder = opuslib.Decoder(OPUS_SAMPLE_RATE, OPUS_CHANNELS)
