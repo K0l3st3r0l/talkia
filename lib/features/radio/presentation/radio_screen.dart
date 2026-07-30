@@ -10,6 +10,73 @@ import '../../debug/log_screen.dart';
 import '../../ota_update/ota_service.dart';
 import '../services/radio_service.dart';
 
+// Funciones puras de presencia y orden, sin estado de widget — testeables
+// directamente (ver test/radio_presence_test.dart) sin emulador ni servicio.
+
+String presenceKeyFor(RoomUser u) => u.id.isNotEmpty ? u.id : 'name:${u.name}';
+
+/// Nombres que representan ingresos genuinos (no reconexiones), comparando
+/// el roster nuevo contra las claves ya conocidas y cuándo se vio cada una
+/// por última vez. Ver protocolo-presencia.md: una reconexión dispara un
+/// user_joined real pero el client_id nunca deja de estar "recién visto",
+/// así que la ventana de 60s la filtra sin necesitar distinguir el tipo de
+/// mensaje que originó el snapshot.
+List<String> newArrivals({
+  required List<RoomUser> newUsers,
+  required Set<String> previousKeys,
+  required Map<String, DateTime> lastSeenAt,
+  required DateTime now,
+  Duration reconnectWindow = const Duration(seconds: 60),
+}) {
+  final arrivals = <String>[];
+  for (final u in newUsers) {
+    final key = presenceKeyFor(u);
+    if (previousKeys.contains(key)) continue;
+    final lastSeen = lastSeenAt[key];
+    final isReconnect =
+        lastSeen != null && now.difference(lastSeen) < reconnectWindow;
+    if (!isReconnect) arrivals.add(u.name);
+  }
+  return arrivals;
+}
+
+String formatJoinBanner(List<String> names) {
+  if (names.isEmpty) return '';
+  if (names.length == 1) return '${names.first} se conectó';
+  if (names.length == 2) return '${names[0]} y ${names[1]} se conectaron';
+  return '${names[0]} y ${names.length - 1} más se conectaron';
+}
+
+/// Orden para la hoja inferior: quien habla, luego tú, luego el resto en el
+/// orden que manda el servidor (orden de llegada). Nunca alfabético.
+List<RoomUser> orderUsersForSheet({
+  required List<RoomUser> users,
+  String? speakerName,
+  required bool Function(RoomUser) isMe,
+}) {
+  RoomUser? speakerUser;
+  RoomUser? meUser;
+  final rest = <RoomUser>[];
+  for (final u in users) {
+    final isSpeaker =
+        speakerName != null && speakerName.isNotEmpty && u.name == speakerName;
+    if (isSpeaker && speakerUser == null) {
+      speakerUser = u;
+      continue;
+    }
+    if (isMe(u) && meUser == null) {
+      meUser = u;
+      continue;
+    }
+    rest.add(u);
+  }
+  return [
+    if (speakerUser != null) speakerUser,
+    if (meUser != null) meUser,
+    ...rest,
+  ];
+}
+
 class RadioScreen extends StatefulWidget {
   final String roomCode;
   final String password;
@@ -26,7 +93,8 @@ class RadioScreen extends StatefulWidget {
   State<RadioScreen> createState() => _RadioScreenState();
 }
 
-class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin {
+class _RadioScreenState extends State<RadioScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   final RadioService _radio = RadioService();
 
   RadioState _state = RadioState.disconnected;
@@ -60,18 +128,35 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
 
   bool _hasMicPermission = false;
 
+  // Presencia: detecta ingresos genuinos vs. reconexiones (ver
+  // wiki/projects/talkia/decisions/protocolo-presencia.md). Un client_id que
+  // ya estaba en el roster hace menos de 60s no es un ingreso nuevo.
+  final Map<String, DateTime> _lastSeenAt = {};
+  Set<String> _previousKeys = {};
+  bool _firstRosterSnapshot = true;
+  bool _appInForeground = true;
+
+  final List<String> _pendingJoinNames = [];
+  Timer? _joinCoalesceTimer;
+  Timer? _joinDismissTimer;
+  Timer? _joinCleanupTimer;
+  String? _joinBannerText;
+  bool _joinBannerVisible = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
 
-    _pulseAnim = Tween<double>(begin: 1.0, end: 1.15).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
-    );
+    _pulseAnim = Tween<double>(
+      begin: 1.0,
+      end: 1.15,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
 
     _waveCtrl = AnimationController(
       vsync: this,
@@ -81,16 +166,25 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
     _init();
   }
 
-  bool _hasAnyNetwork(List<ConnectivityResult> results) => results.any((r) =>
-      r == ConnectivityResult.wifi ||
-      r == ConnectivityResult.mobile ||
-      r == ConnectivityResult.ethernet);
+  bool _hasAnyNetwork(List<ConnectivityResult> results) => results.any(
+    (r) =>
+        r == ConnectivityResult.wifi ||
+        r == ConnectivityResult.mobile ||
+        r == ConnectivityResult.ethernet,
+  );
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appInForeground = state == AppLifecycleState.resumed;
+  }
 
   void _onRoomCodeTap() {
     _roomCodeTaps++;
     if (_roomCodeTaps >= 3) {
       _roomCodeTaps = 0;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LogScreen()));
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const LogScreen()));
     }
   }
 
@@ -113,13 +207,16 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
       });
     });
     _usersSub = _radio.usersStream.listen((u) {
-      if (mounted) setState(() => _users = u);
+      if (!mounted) return;
+      _trackPresence(u);
+      setState(() => _users = u);
     });
     _speakerSub = _radio.speakerStream.listen((s) {
-      if (mounted) setState(() {
-        if (s != null) _lastSpeaker = s;
-        _speaker = s;
-      });
+      if (mounted)
+        setState(() {
+          if (s != null) _lastSpeaker = s;
+          _speaker = s;
+        });
     });
     _errorSub = _radio.errorStream.listen((code) {
       if (!mounted) return;
@@ -127,22 +224,30 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
         _showUpdateRequiredDialog();
         return;
       }
-      const msg = 'Sala nueva — se requiere contraseña de administrador para crearla';
+      const msg =
+          'Sala nueva — se requiere contraseña de administrador para crearla';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(msg), backgroundColor: AppTheme.transmitColor),
+        const SnackBar(
+          content: Text(msg),
+          backgroundColor: AppTheme.transmitColor,
+        ),
       );
       Navigator.of(context).pop();
     });
     _channelBusySub = _radio.channelBusyStream.listen((busyName) {
       if (!mounted) return;
-      final msg = busyName.isNotEmpty ? 'Canal ocupado — $busyName está hablando' : 'Canal ocupado';
+      final msg = busyName.isNotEmpty
+          ? 'Canal ocupado — $busyName está hablando'
+          : 'Canal ocupado';
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(
-          content: Text(msg),
-          backgroundColor: AppTheme.receiveColor,
-          duration: const Duration(seconds: 2),
-        ));
+        ..showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: AppTheme.receiveColor,
+            duration: const Duration(seconds: 2),
+          ),
+        );
     });
 
     final initialConnectivity = await Connectivity().checkConnectivity();
@@ -218,7 +323,11 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
               children: [
                 const Text(
                   'Esta versión ya no es compatible con el servidor. Descarga la nueva versión para continuar.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.5),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 14,
+                    height: 1.5,
+                  ),
                 ),
                 if (downloading) ...[
                   const SizedBox(height: 16),
@@ -232,7 +341,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                     progress != null
                         ? 'Descargando… ${(progress! * 100).toStringAsFixed(0)}%'
                         : 'Descargando…',
-                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ],
@@ -262,7 +374,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                         });
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error al descargar: $e'), backgroundColor: AppTheme.transmitColor),
+                            SnackBar(
+                              content: Text('Error al descargar: $e'),
+                              backgroundColor: AppTheme.transmitColor,
+                            ),
                           );
                         }
                       }
@@ -270,12 +385,17 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.accent,
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                     icon: const Icon(Icons.download, size: 18),
                     label: const Text(
                       'DESCARGAR ACTUALIZACIÓN',
-                      style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                      ),
                     ),
                   ),
                 ),
@@ -292,8 +412,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surface,
-        title: const Text('¿Salir de la sala?',
-            style: TextStyle(color: AppTheme.textPrimary)),
+        title: const Text(
+          '¿Salir de la sala?',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
         content: Text(
           'Hay ${_users.length} ${_users.length == 1 ? 'usuario' : 'usuarios'} en la sala. ¿Confirmas que quieres salir?',
           style: const TextStyle(color: AppTheme.textSecondary),
@@ -301,13 +423,17 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('CANCELAR',
-                style: TextStyle(color: AppTheme.textSecondary)),
+            child: const Text(
+              'CANCELAR',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('SALIR',
-                style: TextStyle(color: AppTheme.transmitColor)),
+            child: const Text(
+              'SALIR',
+              style: TextStyle(color: AppTheme.transmitColor),
+            ),
           ),
         ],
       ),
@@ -332,11 +458,13 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
           : 'Canal ocupado';
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(
-          content: Text(msg),
-          backgroundColor: AppTheme.receiveColor,
-          duration: const Duration(seconds: 2),
-        ));
+        ..showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: AppTheme.receiveColor,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       return;
     }
     await _radio.startTransmitting();
@@ -402,8 +530,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
   }
 
   String get _pttSemanticLabel {
-    if (!_hasNetwork) return 'Sin conexión a internet. Botón de hablar no disponible.';
-    if (_isReconnecting) return 'Reconectando a la sala. Botón de hablar no disponible.';
+    if (!_hasNetwork)
+      return 'Sin conexión a internet. Botón de hablar no disponible.';
+    if (_isReconnecting)
+      return 'Reconectando a la sala. Botón de hablar no disponible.';
     switch (_state) {
       case RadioState.transmitting:
         return 'Transmitiendo. Suelta para terminar.';
@@ -423,12 +553,245 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
   bool get _isActive =>
       _state == RadioState.transmitting || _state == RadioState.receiving;
 
+  Color get _counterColor {
+    if (_rosterMaybeStale) return AppTheme.warnColor;
+    if (_users.length > 1) return AppTheme.receiveColor;
+    return AppTheme.textSecondary;
+  }
+
+  bool _isMe(RoomUser u) =>
+      u.id.isNotEmpty ? u.id == _radio.clientId : u.name == widget.userName;
+
+  // Alimenta el roster de "vistos por última vez" y detecta ingresos
+  // genuinos. Debe correr en cada snapshot (welcome/user_joined/user_left)
+  // para que la ventana de 60s tenga datos frescos de todos, no solo de
+  // quienes generaron un aviso.
+  void _trackPresence(List<RoomUser> newUsers) {
+    final now = DateTime.now();
+    if (!_firstRosterSnapshot) {
+      final arrivals = newArrivals(
+        newUsers: newUsers,
+        previousKeys: _previousKeys,
+        lastSeenAt: _lastSeenAt,
+        now: now,
+      );
+      if (_appInForeground) {
+        for (final name in arrivals) {
+          _queueJoinBanner(name);
+        }
+      }
+    }
+    for (final u in newUsers) {
+      _lastSeenAt[presenceKeyFor(u)] = now;
+    }
+    _previousKeys = newUsers.map(presenceKeyFor).toSet();
+    _firstRosterSnapshot = false;
+  }
+
+  void _queueJoinBanner(String name) {
+    _pendingJoinNames.add(name);
+    _joinCoalesceTimer ??= Timer(const Duration(seconds: 3), _flushJoinBanner);
+  }
+
+  void _flushJoinBanner() {
+    _joinCoalesceTimer = null;
+    if (_pendingJoinNames.isEmpty) return;
+    final names = List<String>.from(_pendingJoinNames);
+    _pendingJoinNames.clear();
+    if (!mounted || !_appInForeground) return;
+    _showJoinBanner(formatJoinBanner(names));
+  }
+
+  void _showJoinBanner(String text) {
+    _joinDismissTimer?.cancel();
+    _joinCleanupTimer?.cancel();
+    setState(() {
+      _joinBannerText = text;
+      _joinBannerVisible = true;
+    });
+    _joinDismissTimer = Timer(const Duration(milliseconds: 2000), () {
+      if (!mounted) return;
+      setState(() => _joinBannerVisible = false);
+      _joinCleanupTimer = Timer(const Duration(milliseconds: 300), () {
+        if (mounted) setState(() => _joinBannerText = null);
+      });
+    });
+  }
+
+  void _openUsersSheet() {
+    final ordered = orderUsersForSheet(
+      users: _users,
+      speakerName: _speaker,
+      isMe: _isMe,
+    );
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.45,
+        minChildSize: 0.25,
+        maxChildSize: 0.6,
+        expand: false,
+        builder: (ctx, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.textSecondary.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      ordered.length == 1
+                          ? '1 conectado'
+                          : '${ordered.length} conectados',
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_rosterMaybeStale)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(
+                        Icons.sync_problem,
+                        size: 12,
+                        color: AppTheme.warnColor,
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        'LISTA PUEDE ESTAR DESACTUALIZADA',
+                        style: TextStyle(
+                          color: AppTheme.warnColor,
+                          fontSize: 10,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              Expanded(
+                child: ordered.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Nadie conectado',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        controller: scrollController,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 4,
+                        ),
+                        itemCount: ordered.length,
+                        separatorBuilder: (_, __) => const Divider(
+                          color: AppTheme.background,
+                          height: 1,
+                        ),
+                        itemBuilder: (ctx, i) => _buildUserRow(ordered[i]),
+                      ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserRow(RoomUser user) {
+    final isSpeaker =
+        _speaker != null && _speaker!.isNotEmpty && user.name == _speaker;
+    final isMe = _isMe(user);
+    final outdated = user.isOutdated || (isMe && _selfBuildBehind);
+    final displayName = isMe ? '${user.name} (tú)' : user.name;
+    final nameColor = isSpeaker
+        ? AppTheme.receiveColor
+        : isMe
+        ? AppTheme.accent
+        : AppTheme.textPrimary;
+    final semanticLabel = [
+      displayName,
+      if (isSpeaker) 'hablando',
+      if (outdated) 'versión desactualizada',
+      user.build > 0 ? 'build ${user.build}' : 'build desconocido',
+    ].join(', ');
+    return Semantics(
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            children: [
+              if (isSpeaker) ...[
+                const Icon(Icons.mic, size: 14, color: AppTheme.receiveColor),
+                const SizedBox(width: 6),
+              ],
+              Expanded(
+                child: Text(
+                  displayName,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: nameColor,
+                    fontSize: 14,
+                    fontWeight: isSpeaker || isMe
+                        ? FontWeight.bold
+                        : FontWeight.normal,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                user.build > 0 ? 'b${user.build}' : 'b?',
+                style: TextStyle(
+                  color: outdated ? AppTheme.warnColor : AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: outdated ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     FlutterForegroundTask.stopService();
     _pulseCtrl.dispose();
     _waveCtrl.dispose();
     _otaTimer?.cancel();
+    _joinCoalesceTimer?.cancel();
+    _joinDismissTimer?.cancel();
+    _joinCleanupTimer?.cancel();
     _stateSub?.cancel();
     _errorSub?.cancel();
     _usersSub?.cancel();
@@ -455,7 +818,10 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
         appBar: AppBar(
           backgroundColor: AppTheme.surface,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios, color: AppTheme.textSecondary),
+            icon: const Icon(
+              Icons.arrow_back_ios,
+              color: AppTheme.textSecondary,
+            ),
             onPressed: () async {
               if (await _confirmExit()) {
                 await _radio.disconnect();
@@ -472,7 +838,11 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
                   children: [
                     const Text(
                       'SALA ',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, letterSpacing: 2),
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 11,
+                        letterSpacing: 2,
+                      ),
                     ),
                     Text(
                       widget.roomCode,
@@ -501,391 +871,410 @@ class _RadioScreenState extends State<RadioScreen> with TickerProviderStateMixin
               },
             ),
             Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.only(right: 4),
               child: Semantics(
+                button: true,
                 label: _users.length == 1
-                    ? '1 usuario conectado en la sala'
-                    : '${_users.length} usuarios conectados en la sala',
-                child: Row(
-                  children: [
-                    Icon(Icons.people, size: 14,
-                      color: _users.length > 1 ? AppTheme.receiveColor : AppTheme.textSecondary),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${_users.length}',
-                      style: TextStyle(
-                        color: _users.length > 1 ? AppTheme.receiveColor : AppTheme.textSecondary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
+                    ? '1 usuario conectado en la sala. Toca para ver la lista.'
+                    : '${_users.length} usuarios conectados en la sala. Toca para ver la lista.',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(22),
+                    onTap: _openUsersSheet,
+                    child: Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 44,
+                        minHeight: 44,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      alignment: Alignment.center,
+                      child: ExcludeSemantics(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.people, size: 14, color: _counterColor),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${_users.length}',
+                              style: TextStyle(
+                                color: _counterColor,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            Icon(
+                              Icons.keyboard_arrow_down,
+                              size: 14,
+                              color: _counterColor,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
           ],
         ),
-        body: Column(
+        body: Stack(
           children: [
-            // Status bar
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              color: AppTheme.surface,
-              child: Center(
-                child: Semantics(
-                  liveRegion: true,
-                  excludeSemantics: true,
-                  label: _state == RadioState.receiving && _speaker != null
-                      ? 'HABLANDO: $_statusLabel'
-                      : _statusLabel,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: 8, height: 8,
-                        decoration: BoxDecoration(shape: BoxShape.circle, color: _buttonColor),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _state == RadioState.receiving && _speaker != null
-                            ? 'HABLANDO: $_statusLabel'
-                            : _statusLabel,
-                        style: TextStyle(
-                          color: _buttonColor,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            // Banner de actualización disponible
-            if (_hasUpdate)
-              GestureDetector(
-                onTap: _installUpdate,
-                child: Container(
+            Column(
+              children: [
+                // Status bar
+                Container(
                   width: double.infinity,
-                  color: AppTheme.accent.withOpacity(0.12),
-                  padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.system_update_alt, color: AppTheme.accent, size: 14),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Nueva versión disponible (build ${_pendingUpdate?.serverBuild}) — toca para actualizar',
-                        style: const TextStyle(color: AppTheme.accent, fontSize: 11, letterSpacing: 1),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  color: AppTheme.surface,
+                  child: Center(
+                    child: Semantics(
+                      liveRegion: true,
+                      excludeSemantics: true,
+                      label: _state == RadioState.receiving && _speaker != null
+                          ? 'HABLANDO: $_statusLabel'
+                          : _statusLabel,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _buttonColor,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _state == RadioState.receiving && _speaker != null
+                                ? 'HABLANDO: $_statusLabel'
+                                : _statusLabel,
+                            style: TextStyle(
+                              color: _buttonColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 2,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
 
-            // Lista de usuarios conectados
-            if (_users.isNotEmpty)
-              Container(
-                width: double.infinity,
-                color: AppTheme.background,
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_rosterMaybeStale)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Semantics(
-                          label: 'Lista de usuarios puede estar desactualizada, reconectando',
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.sync_problem, size: 12, color: AppTheme.warnColor),
-                              SizedBox(width: 4),
-                              Text(
-                                'LISTA PUEDE ESTAR DESACTUALIZADA',
-                                style: TextStyle(color: AppTheme.warnColor, fontSize: 10, letterSpacing: 1),
-                              ),
-                            ],
-                          ),
-                        ),
+                // Banner de actualización disponible
+                if (_hasUpdate)
+                  GestureDetector(
+                    onTap: _installUpdate,
+                    child: Container(
+                      width: double.infinity,
+                      color: AppTheme.accent.withOpacity(0.12),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 7,
+                        horizontal: 16,
                       ),
-                    AnimatedOpacity(
-                      duration: const Duration(milliseconds: 300),
-                      opacity: _rosterMaybeStale ? 0.55 : 1.0,
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: _users.map((user) {
-                            final isSpeaker = user.name == _speaker;
-                            final isMe = user.id.isNotEmpty
-                                ? user.id == _radio.clientId
-                                : user.name == widget.userName;
-                            final outdated = user.isOutdated || (isMe && _selfBuildBehind);
-                            final nameColor = isSpeaker
-                                ? AppTheme.receiveColor
-                                : isMe
-                                    ? AppTheme.accent
-                                    : AppTheme.textSecondary;
-                            final displayName = isMe ? '${user.name} (tú)' : user.name;
-                            final semanticLabel = [
-                              displayName,
-                              if (isSpeaker) 'hablando',
-                              if (outdated) 'versión desactualizada',
-                              user.build > 0 ? 'build ${user.build}' : 'build desconocido',
-                            ].join(', ');
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: Tooltip(
-                                message: semanticLabel,
-                                child: Semantics(
-                                  label: semanticLabel,
-                                  child: ExcludeSemantics(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.system_update_alt,
+                            color: AppTheme.accent,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Nueva versión disponible (build ${_pendingUpdate?.serverBuild}) — toca para actualizar',
+                            style: const TextStyle(
+                              color: AppTheme.accent,
+                              fontSize: 11,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                // Main area con botón PTT
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            if (_isActive)
+                              AnimatedBuilder(
+                                animation: _waveCtrl,
+                                builder: (_, __) => CustomPaint(
+                                  size: const Size(280, 280),
+                                  painter: _WavePainter(
+                                    _waveCtrl.value,
+                                    _buttonColor,
+                                  ),
+                                ),
+                              ),
+                            Semantics(
+                              button: true,
+                              enabled: _state == RadioState.connected,
+                              label: _pttSemanticLabel,
+                              child: ExcludeSemantics(
+                                child: Listener(
+                                  onPointerDown: (_) => _onPttStart(),
+                                  onPointerUp: (_) => _onPttEnd(),
+                                  onPointerCancel: (_) => _onPttEnd(),
+                                  child: AnimatedBuilder(
+                                    animation: _pulseAnim,
+                                    builder: (_, child) => Transform.scale(
+                                      scale: _state == RadioState.transmitting
+                                          ? _pulseAnim.value
+                                          : 1.0,
+                                      child: child,
+                                    ),
                                     child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: isSpeaker
-                                            ? AppTheme.receiveColor.withOpacity(0.2)
-                                            : AppTheme.surface,
-                                        borderRadius: BorderRadius.circular(20),
-                                        border: Border.all(
-                                          color: isSpeaker
-                                              ? AppTheme.receiveColor
-                                              : outdated
-                                                  ? AppTheme.warnColor.withOpacity(0.6)
-                                                  : isMe
-                                                      ? AppTheme.accent.withOpacity(0.5)
-                                                      : Colors.transparent,
-                                          width: 1.5,
-                                        ),
+                                      duration: const Duration(
+                                        milliseconds: 200,
                                       ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (isSpeaker) ...[
-                                            const Icon(Icons.mic, size: 12, color: AppTheme.receiveColor),
-                                            const SizedBox(width: 4),
-                                          ],
-                                          ConstrainedBox(
-                                            constraints: const BoxConstraints(maxWidth: 120),
-                                            child: Text(
-                                              displayName,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 1,
-                                              softWrap: false,
-                                              style: TextStyle(
-                                                color: nameColor,
-                                                fontSize: 12,
-                                                fontWeight: isSpeaker ? FontWeight.bold : FontWeight.normal,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 5),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                            decoration: BoxDecoration(
-                                              color: outdated
-                                                  ? AppTheme.warnColor.withOpacity(0.18)
-                                                  : AppTheme.background.withOpacity(0.6),
-                                              borderRadius: BorderRadius.circular(6),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                if (outdated) ...[
-                                                  const Icon(Icons.system_update_alt,
-                                                      size: 9, color: AppTheme.warnColor),
-                                                  const SizedBox(width: 2),
-                                                ],
-                                                Text(
-                                                  user.build > 0 ? 'b${user.build}' : 'b?',
-                                                  style: TextStyle(
-                                                    color: outdated ? AppTheme.warnColor : AppTheme.textSecondary,
-                                                    fontSize: 9,
-                                                    fontWeight: outdated ? FontWeight.bold : FontWeight.normal,
-                                                  ),
+                                      width: 160,
+                                      height: 160,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: _buttonColor.withOpacity(0.15),
+                                        border: Border.all(
+                                          color: _buttonColor,
+                                          width: _isActive ? 4 : 2,
+                                        ),
+                                        boxShadow: _isActive
+                                            ? [
+                                                BoxShadow(
+                                                  color: _buttonColor
+                                                      .withOpacity(0.4),
+                                                  blurRadius: 30,
+                                                  spreadRadius: 8,
                                                 ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
+                                              ]
+                                            : [],
+                                      ),
+                                      child: Icon(
+                                        _state == RadioState.transmitting
+                                            ? Icons.mic
+                                            : _state == RadioState.receiving
+                                            ? Icons.volume_up
+                                            : Icons.mic_none,
+                                        color: _buttonColor,
+                                        size: 72,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            // Main area con botón PTT
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        if (_isActive)
-                          AnimatedBuilder(
-                            animation: _waveCtrl,
-                            builder: (_, __) => CustomPaint(
-                              size: const Size(280, 280),
-                              painter: _WavePainter(_waveCtrl.value, _buttonColor),
                             ),
-                          ),
-                        Semantics(
-                          button: true,
-                          enabled: _state == RadioState.connected,
-                          label: _pttSemanticLabel,
-                          child: ExcludeSemantics(
-                            child: Listener(
-                              onPointerDown: (_) => _onPttStart(),
-                              onPointerUp: (_) => _onPttEnd(),
-                              onPointerCancel: (_) => _onPttEnd(),
-                              child: AnimatedBuilder(
-                                animation: _pulseAnim,
-                                builder: (_, child) => Transform.scale(
-                                  scale: _state == RadioState.transmitting ? _pulseAnim.value : 1.0,
-                                  child: child,
-                                ),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 200),
-                                  width: 160, height: 160,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _buttonColor.withOpacity(0.15),
-                                    border: Border.all(color: _buttonColor, width: _isActive ? 4 : 2),
-                                    boxShadow: _isActive
-                                        ? [BoxShadow(color: _buttonColor.withOpacity(0.4), blurRadius: 30, spreadRadius: 8)]
-                                        : [],
-                                  ),
-                                  child: Icon(
-                                    _state == RadioState.transmitting
-                                        ? Icons.mic
-                                        : _state == RadioState.receiving
-                                            ? Icons.volume_up
-                                            : Icons.mic_none,
-                                    color: _buttonColor,
-                                    size: 72,
-                                  ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 40),
+
+                        AnimatedOpacity(
+                          duration: const Duration(milliseconds: 300),
+                          opacity: _state == RadioState.connected ? 1.0 : 0.0,
+                          child: const Column(
+                            children: [
+                              Icon(
+                                Icons.touch_app,
+                                color: AppTheme.textSecondary,
+                                size: 20,
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                'PRESIONA PARA HABLAR',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 11,
+                                  letterSpacing: 2,
                                 ),
                               ),
+                            ],
+                          ),
+                        ),
+
+                        if (_state == RadioState.transmitting)
+                          const Text(
+                            'SUELTA PARA TERMINAR',
+                            style: TextStyle(
+                              color: AppTheme.transmitColor,
+                              fontSize: 11,
+                              letterSpacing: 2,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+
+                        if (_state == RadioState.receiving && _speaker != null)
+                          Text(
+                            '${_speaker!.toUpperCase()} ESTÁ HABLANDO',
+                            style: const TextStyle(
+                              color: AppTheme.receiveColor,
+                              fontSize: 11,
+                              letterSpacing: 2,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                        else if (_state == RadioState.receiving)
+                          const Text(
+                            'ESCUCHANDO...',
+                            style: TextStyle(
+                              color: AppTheme.receiveColor,
+                              fontSize: 11,
+                              letterSpacing: 2,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+
+                        if (_lastSpeaker != null && _speaker == null) ...[
+                          const SizedBox(height: 20),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.history,
+                                size: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'ÚLTIMO: ${_lastSpeaker!.toUpperCase()}',
+                                style: const TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 11,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Control de volumen
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.volume_down,
+                        color: AppTheme.textSecondary,
+                        size: 18,
+                      ),
+                      Expanded(
+                        child: Slider(
+                          value: _volume,
+                          min: 0.0,
+                          max: 1.0,
+                          onChanged: (v) {
+                            setState(() => _volume = v);
+                            _radio.setVolume(v);
+                          },
+                          activeColor: AppTheme.accent,
+                          inactiveColor: AppTheme.surface,
+                        ),
+                      ),
+                      const Icon(
+                        Icons.volume_up,
+                        color: AppTheme.textSecondary,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 6),
+                      SizedBox(
+                        width: 36,
+                        child: Text(
+                          '${(_volume * 100).round()}%',
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 11,
+                          ),
+                          textAlign: TextAlign.right,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Footer
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    _users.length == 1
+                        ? 'Solo tú en la sala'
+                        : '${_users.length} usuarios conectados',
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            // Aviso transitorio de ingreso — desliza desde arriba, se va
+            // solo. No es SnackBar: eso aparece abajo y tapa el botón PTT.
+            if (_joinBannerText != null)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: AnimatedSlide(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                  offset: _joinBannerVisible
+                      ? Offset.zero
+                      : const Offset(0, -1),
+                  child: Material(
+                    color: AppTheme.accent.withOpacity(0.14),
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 10,
+                          horizontal: 16,
+                        ),
+                        child: Semantics(
+                          liveRegion: true,
+                          label: _joinBannerText,
+                          child: ExcludeSemantics(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.person_add_alt_1,
+                                  color: AppTheme.accent,
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    _joinBannerText!,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: AppTheme.accent,
+                                      fontSize: 12,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 40),
-
-                    AnimatedOpacity(
-                      duration: const Duration(milliseconds: 300),
-                      opacity: _state == RadioState.connected ? 1.0 : 0.0,
-                      child: const Column(
-                        children: [
-                          Icon(Icons.touch_app, color: AppTheme.textSecondary, size: 20),
-                          SizedBox(height: 8),
-                          Text(
-                            'PRESIONA PARA HABLAR',
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, letterSpacing: 2),
-                          ),
-                        ],
                       ),
                     ),
-
-                    if (_state == RadioState.transmitting)
-                      const Text(
-                        'SUELTA PARA TERMINAR',
-                        style: TextStyle(color: AppTheme.transmitColor, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold),
-                      ),
-
-                    if (_state == RadioState.receiving && _speaker != null)
-                      Text(
-                        '${_speaker!.toUpperCase()} ESTÁ HABLANDO',
-                        style: const TextStyle(color: AppTheme.receiveColor, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold),
-                      )
-                    else if (_state == RadioState.receiving)
-                      const Text(
-                        'ESCUCHANDO...',
-                        style: TextStyle(color: AppTheme.receiveColor, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold),
-                      ),
-
-                    if (_lastSpeaker != null && _speaker == null) ...[
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.history, size: 12, color: AppTheme.textSecondary),
-                          const SizedBox(width: 6),
-                          Text(
-                            'ÚLTIMO: ${_lastSpeaker!.toUpperCase()}',
-                            style: const TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 11,
-                              letterSpacing: 1.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-
-            // Control de volumen
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Row(
-                children: [
-                  const Icon(Icons.volume_down, color: AppTheme.textSecondary, size: 18),
-                  Expanded(
-                    child: Slider(
-                      value: _volume,
-                      min: 0.0,
-                      max: 1.0,
-                      onChanged: (v) {
-                        setState(() => _volume = v);
-                        _radio.setVolume(v);
-                      },
-                      activeColor: AppTheme.accent,
-                      inactiveColor: AppTheme.surface,
-                    ),
-                  ),
-                  const Icon(Icons.volume_up, color: AppTheme.textSecondary, size: 18),
-                  const SizedBox(width: 6),
-                  SizedBox(
-                    width: 36,
-                    child: Text(
-                      '${(_volume * 100).round()}%',
-                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                      textAlign: TextAlign.right,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Footer
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Text(
-                _users.length == 1 ? 'Solo tú en la sala' : '${_users.length} usuarios conectados',
-                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-              ),
-            ),
           ],
         ),
       ),

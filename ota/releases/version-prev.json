@@ -1,7 +1,7 @@
 {
-  "version": "1.0.29",
-  "build": 29,
-  "min_build": 0,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=29",
-  "changelog": "presencia real: client_id estable, reaper de fantasmas, roster completo y backoff de reconexion"
+  "version": "1.0.30",
+  "build": 30,
+  "min_build": 29,
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=30",
+  "changelog": "harden: estados de conexión (reconectando/sin red), roster potencialmente obsoleto, marca de build propio desactualizado, overflow de nombres largos, accesibilidad del botón PTT y contador de usuarios"
 }
