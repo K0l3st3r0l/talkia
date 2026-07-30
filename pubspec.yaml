@@ -2,7 +2,7 @@ name: talkia
 description: "TalkIA — Walkie-talkie app con Flutter"
 publish_to: 'none'
 
-version: 1.0.31+31
+version: 1.0.32+32
 
 environment:
   sdk: ^3.8.0
@@ -24,6 +24,7 @@ dependencies:
   connectivity_plus: ^6.1.4
   opus_dart: ^3.0.1
   opus_flutter: ^3.0.3
+  disk_space_plus: ^0.2.6
 
 dev_dependencies:
   flutter_test:

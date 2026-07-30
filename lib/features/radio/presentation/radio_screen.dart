@@ -122,8 +122,10 @@ class _RadioScreenState extends State<RadioScreen>
   StreamSubscription? _channelBusySub;
   StreamSubscription? _connectivitySub;
 
+  final OtaService _ota = OtaService();
   Timer? _otaTimer;
   bool _hasUpdate = false;
+  bool _updateReady = false;
   OtaCheckResult? _pendingUpdate;
 
   bool _hasMicPermission = false;
@@ -192,6 +194,12 @@ class _RadioScreenState extends State<RadioScreen>
     log.info('RadioScreen init — sala: ${widget.roomCode}');
     await _radio.init();
 
+    _ota.isAudioActiveProvider = () => _isActive;
+    _ota.onPreloadReady = (build) {
+      if (!mounted || _pendingUpdate?.serverBuild != build) return;
+      setState(() => _updateReady = true);
+    };
+
     final status = await Permission.microphone.request();
     _hasMicPermission = status.isGranted;
 
@@ -205,6 +213,14 @@ class _RadioScreenState extends State<RadioScreen>
           _hasConnectedOnce = true;
         }
       });
+      // Es una radio: 55MB de precarga compitiendo con el stream de audio
+      // degrada justo la función principal de la app — cortar apenas hay
+      // audio activo (propio o de otro hablando) y retomar al quedar idle.
+      if (s == RadioState.transmitting || s == RadioState.receiving) {
+        _ota.cancelPreloadForAudio();
+      } else if (s == RadioState.connected) {
+        _ota.resumeIfPending();
+      }
     });
     _usersSub = _radio.usersStream.listen((u) {
       if (!mounted) return;
@@ -278,21 +294,35 @@ class _RadioScreenState extends State<RadioScreen>
   }
 
   Future<void> _checkOta() async {
-    final result = await OtaService().checkForUpdate();
+    final result = await _ota.checkForUpdate();
     if (result == null || !result.hasUpdate || !mounted) return;
     if (_hasUpdate && result.serverBuild == _pendingUpdate?.serverBuild) return;
+    final ready = await _ota.isPreloaded(result.serverBuild);
+    if (!mounted) return;
     setState(() {
       _hasUpdate = true;
       _pendingUpdate = result;
+      _updateReady = ready;
     });
     log.info('OTA update disponible en sala: build ${result.serverBuild}');
+    if (!ready) _ota.maybePreload(result);
   }
 
   Future<void> _installUpdate() async {
     final update = _pendingUpdate;
     if (update == null) return;
+    if (_updateReady) {
+      final installed = await _ota.installPreloaded(update.serverBuild);
+      if (installed) {
+        setState(() => _hasUpdate = false);
+        return;
+      }
+      // getTemporaryDirectory() pudo vaciarse bajo presión de
+      // almacenamiento — cae al flujo de descarga normal sin error visible.
+      setState(() => _updateReady = false);
+    }
     setState(() => _hasUpdate = false);
-    await OtaService().downloadAndInstall(update.apkUrl);
+    await _ota.downloadAndInstall(update.apkUrl, build: update.serverBuild);
   }
 
   void _showUpdateRequiredDialog() {
@@ -357,10 +387,11 @@ class _RadioScreenState extends State<RadioScreen>
                     onPressed: () async {
                       setDialogState(() => downloading = true);
                       try {
-                        final result = await OtaService().checkForUpdate();
+                        final result = await _ota.checkForUpdate();
                         final url = result?.apkUrl ?? kOtaApkUrl;
-                        await OtaService().downloadAndInstall(
+                        await _ota.downloadAndInstall(
                           url,
+                          build: result?.serverBuild,
                           onProgress: (received, total) {
                             if (total > 0) {
                               setDialogState(() => progress = received / total);
@@ -799,6 +830,7 @@ class _RadioScreenState extends State<RadioScreen>
     _channelBusySub?.cancel();
     _connectivitySub?.cancel();
     _radio.dispose();
+    _ota.dispose();
     super.dispose();
   }
 
@@ -979,14 +1011,18 @@ class _RadioScreenState extends State<RadioScreen>
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(
-                            Icons.system_update_alt,
+                          Icon(
+                            _updateReady
+                                ? Icons.install_mobile
+                                : Icons.system_update_alt,
                             color: AppTheme.accent,
                             size: 14,
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'Nueva versión disponible (build ${_pendingUpdate?.serverBuild}) — toca para actualizar',
+                            _updateReady
+                                ? 'Nueva versión lista (build ${_pendingUpdate?.serverBuild}) — toca para instalar'
+                                : 'Nueva versión disponible (build ${_pendingUpdate?.serverBuild}) — toca para actualizar',
                             style: const TextStyle(
                               color: AppTheme.accent,
                               fontSize: 11,

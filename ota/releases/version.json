@@ -1,7 +1,7 @@
 {
-  "version": "1.0.31",
-  "build": 31,
+  "version": "1.0.32",
+  "build": 32,
   "min_build": 29,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=31",
-  "changelog": "Hoja inferior de conectados + banda de aviso de ingreso con supresion de reconexiones; elimina tira horizontal de chips"
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=32",
+  "changelog": "Precarga OTA sobre wifi: banner instala al toque cuando ya esta descargado"
 }
