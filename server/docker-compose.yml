@@ -5,7 +5,12 @@ services:
     restart: unless-stopped
     environment:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-talkia2026}
-      - MIN_BUILD=${MIN_BUILD:-0}
+      # Piso de protocolo, no de features: 29 es el primer build que manda
+      # client_id. Por debajo de eso el servidor tendria que sostener la ruta
+      # legacy (ids anon-*, campo `users` de strings) y reaparecen los nombres
+      # duplicados hasta 45s en cada reconexion. Solo se sube cuando el
+      # protocolo rompe compatibilidad, nunca por una version nueva.
+      - MIN_BUILD=${MIN_BUILD:-29}
     networks:
       - nginx-network
 
