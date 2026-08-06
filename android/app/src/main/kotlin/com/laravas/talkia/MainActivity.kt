@@ -4,8 +4,12 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.database.ContentObserver
 import android.media.AudioTrack
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -15,6 +19,37 @@ class MainActivity : FlutterActivity() {
     private var audioTrack: AudioTrack? = null
     private val sampleRate = 16000
     private var currentVolume: Float = 1.0f
+
+    private var methodChannel: MethodChannel? = null
+    private var volumeObserver: ContentObserver? = null
+    private var lastReportedVolume: Float = -1f
+
+    // Volumen de medios del sistema, normalizado 0..1
+    private fun systemVolume(): Float {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (max <= 0) return 0f
+        return am.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max
+    }
+
+    // Los botones físicos de volumen no pasan por la app. Sin observer, el
+    // aviso de "volumen bajo" quedaría mostrando un valor viejo justo cuando
+    // el usuario acaba de corregirlo.
+    private fun registerVolumeObserver() {
+        if (volumeObserver != null) return
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                val vol = systemVolume()
+                if (vol == lastReportedVolume) return
+                lastReportedVolume = vol
+                methodChannel?.invokeMethod("onSystemVolumeChanged", vol.toDouble())
+            }
+        }
+        contentResolver.registerContentObserver(
+            Settings.System.CONTENT_URI, true, observer
+        )
+        volumeObserver = observer
+    }
 
     private fun buildAudioTrack(): AudioTrack {
         val bufferSize = maxOf(
@@ -80,10 +115,14 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(
+        val channel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.laravas.talkia/audio"
-        ).setMethodCallHandler { call, result ->
+        )
+        methodChannel = channel
+        registerVolumeObserver()
+
+        channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "setSpeakerMode" -> {
                     val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -98,6 +137,12 @@ class MainActivity : FlutterActivity() {
                 "releaseBluetoothSco" -> {
                     releaseBluetoothSco()
                     result.success(null)
+                }
+                "getVolume" -> {
+                    val vol = systemVolume()
+                    lastReportedVolume = vol
+                    currentVolume = vol
+                    result.success(vol.toDouble())
                 }
                 "playPcmChunk" -> {
                     val pcm = call.argument<ByteArray>("pcm")
@@ -128,6 +173,7 @@ class MainActivity : FlutterActivity() {
                     val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     am.setStreamVolume(AudioManager.STREAM_MUSIC, (currentVolume * maxVol).toInt(), 0)
                     audioTrack?.setVolume(1.0f)
+                    lastReportedVolume = systemVolume()
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -136,6 +182,9 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        volumeObserver?.let { contentResolver.unregisterContentObserver(it) }
+        volumeObserver = null
+        methodChannel = null
         audioTrack?.stop()
         audioTrack?.release()
         audioTrack = null

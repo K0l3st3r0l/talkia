@@ -1,7 +1,7 @@
 {
-  "version": "1.0.33",
-  "build": 33,
+  "version": "1.0.34",
+  "build": 34,
   "min_build": 29,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=33",
-  "changelog": "Fix: no forzar Bluetooth SCO — el audio del telefono se mantiene en A2DP; toggle opt-in para mic del manos libres"
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=34",
+  "changelog": "Aviso de volumen bajo: la app lee el volumen real del sistema y avisa si esta bajo 70%, con boton para subirlo"
 }

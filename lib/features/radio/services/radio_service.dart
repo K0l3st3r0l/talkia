@@ -353,6 +353,10 @@ class RadioService {
     await _audio.setVolume(level);
   }
 
+  Future<double> getVolume() => _audio.getVolume();
+
+  Stream<double> get systemVolumeStream => _audio.systemVolumeStream;
+
   void _sendText(Map<String, dynamic> data) {
     try {
       _channel?.sink.add(jsonEncode(data));

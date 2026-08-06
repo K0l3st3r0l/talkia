@@ -1,7 +1,7 @@
 {
-  "version": "1.0.32",
-  "build": 32,
+  "version": "1.0.33",
+  "build": 33,
   "min_build": 29,
-  "url": "https://ota.laravas.com/talkia-latest.apk?v=32",
-  "changelog": "Precarga OTA sobre wifi: banner instala al toque cuando ya esta descargado"
+  "url": "https://ota.laravas.com/talkia-latest.apk?v=33",
+  "changelog": "Fix: no forzar Bluetooth SCO — el audio del telefono se mantiene en A2DP; toggle opt-in para mic del manos libres"
 }

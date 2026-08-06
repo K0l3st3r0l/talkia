@@ -29,6 +29,12 @@ class AudioService {
   StreamController<Uint8List>? _outgoingAudio;
   StreamSubscription? _recordSub;
 
+  // El volumen de medios lo puede cambiar cualquiera desde los botones
+  // físicos, así que la UI se entera por acá y no por lo último que ella misma
+  // haya seteado.
+  final _systemVolumeCtrl = StreamController<double>.broadcast();
+  Stream<double> get systemVolumeStream => _systemVolumeCtrl.stream;
+
   SimpleOpusEncoder? _encoder;
   SimpleOpusDecoder? _decoder;
   final _encodeBuffer = <int>[];
@@ -37,6 +43,12 @@ class AudioService {
 
   Future<void> init() async {
     log.info('AudioService init');
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onSystemVolumeChanged') {
+        final level = (call.arguments as num).toDouble();
+        if (!_systemVolumeCtrl.isClosed) _systemVolumeCtrl.add(level);
+      }
+    });
     final lib = await opus_flutter.load() as DynamicLibrary;
     initOpus(lib);
     _encoder = SimpleOpusEncoder(
@@ -156,6 +168,18 @@ class AudioService {
     } catch (_) {}
   }
 
+  /// Volumen de medios del sistema, 0..1. Ya no lo forzamos al máximo al
+  /// abrir, así que hay que leerlo para saber si el usuario va a escuchar.
+  Future<double> getVolume() async {
+    try {
+      final level = await _channel.invokeMethod<double>('getVolume');
+      return (level ?? 1.0).clamp(0.0, 1.0);
+    } catch (e) {
+      log.warn('getVolume falló: $e');
+      return 1.0;
+    }
+  }
+
   Future<void> setVolume(double level) async {
     try {
       await _channel.invokeMethod('setVolume', {'level': level.clamp(0.0, 1.0)});
@@ -182,6 +206,8 @@ class AudioService {
   }
 
   Future<void> dispose() async {
+    _channel.setMethodCallHandler(null);
+    await _systemVolumeCtrl.close();
     await _recordSub?.cancel();
     _recordSub = null;
     await _recorder.dispose();

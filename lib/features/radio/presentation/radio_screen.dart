@@ -122,6 +122,7 @@ class _RadioScreenState extends State<RadioScreen>
   StreamSubscription? _speakerSub;
   StreamSubscription? _channelBusySub;
   StreamSubscription? _connectivitySub;
+  StreamSubscription? _volumeSub;
 
   final OtaService _ota = OtaService();
   Timer? _otaTimer;
@@ -194,7 +195,16 @@ class _RadioScreenState extends State<RadioScreen>
   Future<void> _init() async {
     log.info('RadioScreen init — sala: ${widget.roomCode}');
     await _radio.init();
-    if (mounted) setState(() => _useBluetoothMic = _radio.useBluetoothMic);
+    final volume = await _radio.getVolume();
+    if (mounted) {
+      setState(() {
+        _useBluetoothMic = _radio.useBluetoothMic;
+        _volume = volume;
+      });
+    }
+    _volumeSub = _radio.systemVolumeStream.listen((v) {
+      if (mounted) setState(() => _volume = v);
+    });
 
     _ota.isAudioActiveProvider = () => _isActive;
     _ota.onPreloadReady = (build) {
@@ -906,6 +916,7 @@ class _RadioScreenState extends State<RadioScreen>
     _speakerSub?.cancel();
     _channelBusySub?.cancel();
     _connectivitySub?.cancel();
+    _volumeSub?.cancel();
     _radio.dispose();
     _ota.dispose();
     super.dispose();
@@ -1283,6 +1294,63 @@ class _RadioScreenState extends State<RadioScreen>
                     ),
                   ),
                 ),
+
+                // Aviso de volumen bajo. Desde build 33 la app ya no fuerza el
+                // volumen de medios al máximo al abrir, así que hay que avisar
+                // en vez de decidir por el usuario.
+                if (_volume < kLowVolumeThreshold)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 16, 0),
+                    child: Semantics(
+                      liveRegion: true,
+                      label:
+                          'Volumen del teléfono al ${(_volume * 100).round()} '
+                          'por ciento. Puedes no escuchar las transmisiones.',
+                      child: ExcludeSemantics(
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.warning_amber_rounded,
+                              size: 14,
+                              color: AppTheme.warnColor,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Volumen al ${(_volume * 100).round()}% — '
+                                'puedes no escuchar las transmisiones',
+                                style: const TextStyle(
+                                  color: AppTheme.warnColor,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                setState(() => _volume = 1.0);
+                                _radio.setVolume(1.0);
+                              },
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(44, 36),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                              ),
+                              child: const Text(
+                                'SUBIR',
+                                style: TextStyle(
+                                  color: AppTheme.accent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
 
                 // Control de volumen
                 Padding(
