@@ -104,6 +104,7 @@ class _RadioScreenState extends State<RadioScreen>
   int _roomCodeTaps = 0;
   bool _muted = false;
   double _volume = 1.0;
+  bool _useBluetoothMic = false;
 
   // Distingue "primera conexión" de "se cayó y está reintentando" para no
   // mostrar un DESCONECTADO que sugiere inacción cuando el backoff ya está
@@ -193,6 +194,7 @@ class _RadioScreenState extends State<RadioScreen>
   Future<void> _init() async {
     log.info('RadioScreen init — sala: ${widget.roomCode}');
     await _radio.init();
+    if (mounted) setState(() => _useBluetoothMic = _radio.useBluetoothMic);
 
     _ota.isAudioActiveProvider = () => _isActive;
     _ota.onPreloadReady = (build) {
@@ -754,6 +756,81 @@ class _RadioScreenState extends State<RadioScreen>
     );
   }
 
+  void _openAudioSettingsSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: StatefulBuilder(
+            builder: (ctx, setSheetState) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.textSecondary.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+                  child: Row(
+                    children: [
+                      Text(
+                        'AUDIO',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SwitchListTile(
+                  value: _useBluetoothMic,
+                  activeColor: AppTheme.accent,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  title: const Text(
+                    'Micrófono del manos libres',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 14,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Habla por el audífono o el equipo del auto. Mientras esté '
+                    'activo, todo el audio del teléfono (música, videos) baja a '
+                    'calidad de llamada.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                  onChanged: (v) async {
+                    setSheetState(() => _useBluetoothMic = v);
+                    setState(() {});
+                    await _radio.setUseBluetoothMic(v);
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildUserRow(RoomUser user) {
     final isSpeaker =
         _speaker != null && _speaker!.isNotEmpty && user.name == _speaker;
@@ -891,6 +968,17 @@ class _RadioScreenState extends State<RadioScreen>
             ),
           ),
           actions: [
+            IconButton(
+              icon: Icon(
+                _useBluetoothMic ? Icons.bluetooth_audio : Icons.tune,
+                color: _useBluetoothMic
+                    ? AppTheme.accent
+                    : AppTheme.textSecondary,
+                size: 20,
+              ),
+              tooltip: 'Ajustes de audio',
+              onPressed: _openAudioSettingsSheet,
+            ),
             IconButton(
               icon: Icon(
                 _muted ? Icons.volume_off : Icons.volume_up,

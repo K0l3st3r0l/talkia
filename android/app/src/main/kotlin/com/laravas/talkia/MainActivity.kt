@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -55,6 +56,27 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun releaseBluetoothSco() {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        try {
+            // startBluetoothSco() sigue siendo lo que usa el plugin `record`
+            // incluso en API 31+, así que hay que apagarlo por la misma vía.
+            if (am.isBluetoothScoOn) {
+                am.stopBluetoothSco()
+                am.isBluetoothScoOn = false
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                am.clearCommunicationDevice()
+            }
+            if (am.mode != AudioManager.MODE_NORMAL) {
+                am.mode = AudioManager.MODE_NORMAL
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("TalkIA", "releaseBluetoothSco: ${e.message}")
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -67,10 +89,14 @@ class MainActivity : FlutterActivity() {
                     val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                     am.mode = AudioManager.MODE_NORMAL
                     am.isSpeakerphoneOn = false
-                    // Forzar volumen de medios al máximo al iniciar
-                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    am.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
                     currentVolume = 1.0f
+                    result.success(null)
+                }
+                // Devuelve el enlace Bluetooth a A2DP. Sin esto, un SCO abierto
+                // deja todo el audio del sistema en calidad de llamada (mono,
+                // 8-16 kHz) mientras la app esté viva.
+                "releaseBluetoothSco" -> {
+                    releaseBluetoothSco()
                     result.success(null)
                 }
                 "playPcmChunk" -> {

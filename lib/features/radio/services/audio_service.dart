@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:opus_dart/opus_dart.dart';
 import 'package:opus_flutter/opus_flutter.dart' as opus_flutter;
 import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/log_service.dart';
 
 class AudioService {
@@ -14,7 +15,17 @@ class AudioService {
   static const _frameSamples = 320;
   static const _frameSizeBytes = _frameSamples * 2;
 
-  final AudioRecorder _recorder = AudioRecorder();
+  static const prefUseBluetoothMic = 'use_bluetooth_mic';
+
+  // El plugin `record` trae manageBluetooth=true por defecto: al crear el
+  // recorder nativo levanta Bluetooth SCO (HFP) y saca el enlace de A2DP,
+  // dejando *todo* el audio del teléfono en calidad de llamada mientras la
+  // app viva. Por defecto lo apagamos; quien quiera hablar por el micrófono
+  // del manos libres lo activa y acepta el costo.
+  bool _useBluetoothMic = false;
+  bool get useBluetoothMic => _useBluetoothMic;
+
+  AudioRecorder _recorder = AudioRecorder();
   StreamController<Uint8List>? _outgoingAudio;
   StreamSubscription? _recordSub;
 
@@ -36,6 +47,35 @@ class AudioService {
     _decoder = SimpleOpusDecoder(sampleRate: _sampleRate, channels: 1);
     log.info('Opus encoder/decoder inicializados');
     await _setSpeakerMode(true);
+
+    final prefs = await SharedPreferences.getInstance();
+    _useBluetoothMic = prefs.getBool(prefUseBluetoothMic) ?? false;
+    log.info('mic bluetooth: $_useBluetoothMic');
+    // Limpia un SCO que haya quedado colgado de una sesión anterior.
+    if (!_useBluetoothMic) await _releaseBluetoothSco();
+  }
+
+  /// Cambia el origen del micrófono. El plugin decide si maneja SCO al crear
+  /// el recorder nativo, y eso ocurre una sola vez por instancia — hay que
+  /// rehacerla para que el cambio tome efecto sin reiniciar la app.
+  Future<void> setUseBluetoothMic(bool enabled) async {
+    if (_useBluetoothMic == enabled) return;
+    _useBluetoothMic = enabled;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(prefUseBluetoothMic, enabled);
+
+    await _recordSub?.cancel();
+    _recordSub = null;
+    try {
+      await _recorder.dispose();
+    } catch (e) {
+      log.warn('dispose del recorder falló al cambiar mic: $e');
+    }
+    _recorder = AudioRecorder();
+
+    if (!enabled) await _releaseBluetoothSco();
+    log.info('mic bluetooth: $enabled');
   }
 
   Future<bool> hasMicPermission() async {
@@ -51,10 +91,13 @@ class AudioService {
 
     log.info('startStream PCM 16bit 16kHz mono → encode Opus');
     final stream = await _recorder.startStream(
-      const RecordConfig(
+      RecordConfig(
         encoder: AudioEncoder.pcm16bits,
         sampleRate: _sampleRate,
         numChannels: 1,
+        androidConfig: AndroidRecordConfig(
+          manageBluetooth: _useBluetoothMic,
+        ),
       ),
     );
     log.info('startStream OK');
@@ -88,6 +131,9 @@ class AudioService {
     await _outgoingAudio?.close();
     _outgoingAudio = null;
     _encodeBuffer.clear();
+    // El plugin solo apaga SCO en dispose()/cancel(), nunca en stop(). Red de
+    // seguridad para equipos donde algo más lo dejó activo.
+    if (!_useBluetoothMic) await _releaseBluetoothSco();
     log.info('stopRecording OK');
   }
 
@@ -115,6 +161,14 @@ class AudioService {
       await _channel.invokeMethod('setVolume', {'level': level.clamp(0.0, 1.0)});
     } catch (e) {
       log.warn('setVolume falló: $e');
+    }
+  }
+
+  Future<void> _releaseBluetoothSco() async {
+    try {
+      await _channel.invokeMethod('releaseBluetoothSco');
+    } catch (e) {
+      log.warn('releaseBluetoothSco falló: $e');
     }
   }
 

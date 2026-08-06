@@ -75,6 +75,11 @@ class RadioService {
 
   Future<bool> hasMicPermission() => _audio.hasMicPermission();
 
+  bool get useBluetoothMic => _audio.useBluetoothMic;
+
+  Future<void> setUseBluetoothMic(bool enabled) =>
+      _audio.setUseBluetoothMic(enabled);
+
   Future<void> connect(String roomCode, {String password = '', String userName = ''}) async {
     _roomCode = roomCode.toUpperCase().trim();
     _password = password;
